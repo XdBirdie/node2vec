@@ -2,3 +2,8 @@
 .vscode
 target
 dependency-reduced-pom.xml
+python
+*.log
+shell
+note
+data
