@@ -21,6 +21,8 @@ object Node2vec extends Serializable {
   var graph: Graph[NodeAttr, EdgeAttr] = _
   var randomWalkPaths: RDD[(Long, ArrayBuffer[Long])] = null
 
+  val NUM_PARTITION = 16
+
   def setup(context: SparkContext, param: Main.Params): this.type = {
     this.context = context
     this.config = param
@@ -49,13 +51,13 @@ object Node2vec extends Serializable {
       }
         
       (nodeId, NodeAttr(neighbors = neighbors_.distinct))
-    }.repartition(200).cache
+    }.repartition(NUM_PARTITION).cache
     
     indexedEdges = indexedNodes.flatMap { case (srcId, clickNode) =>
       clickNode.neighbors.map { case (dstId, weight) =>
           Edge(srcId, dstId, EdgeAttr())
       }
-    }.repartition(200).cache
+    }.repartition(NUM_PARTITION).cache
     
     this
   }
@@ -85,12 +87,16 @@ object Node2vec extends Serializable {
   }
   
   def randomWalk(): this.type = {
+    // val edge2attr = graph.triplets.map { edgeTriplet =>
+    //   (s"${edgeTriplet.srcId}${edgeTriplet.dstId}", edgeTriplet.attr)
+    // }.repartition(NUM_PARTITION).cache
     val edge2attr = graph.triplets.map { edgeTriplet =>
-      (s"${edgeTriplet.srcId}${edgeTriplet.dstId}", edgeTriplet.attr)
+      ((edgeTriplet.srcId, edgeTriplet.dstId), edgeTriplet.attr)
     }.repartition(200).cache
     edge2attr.first
     
     for (iter <- 0 until config.numWalks) {
+      logger.warn(s"Begin randomwalk $iter")
       var prevWalk: RDD[(Long, ArrayBuffer[Long])] = null
       var randomWalk = graph.vertices.map { case (nodeId, clickNode) =>
         val pathBuffer = new ArrayBuffer[Long]()
@@ -106,7 +112,8 @@ object Node2vec extends Serializable {
           val prevNodeId = pathBuffer(pathBuffer.length - 2)
           val currentNodeId = pathBuffer.last
 
-          (s"$prevNodeId$currentNodeId", (srcNodeId, pathBuffer))
+          // (s"$prevNodeId$currentNodeId", (srcNodeId, pathBuffer))
+          ((prevNodeId, currentNodeId), (srcNodeId, pathBuffer))
         }.join(edge2attr).map { case (edge, ((srcNodeId, pathBuffer), attr)) =>
           try {
             val nextNodeIndex = GraphOps.drawAlias(attr.J, attr.q)
@@ -132,12 +139,13 @@ object Node2vec extends Serializable {
       } else {
         randomWalkPaths = randomWalk
       }
+      logger.warn(s"End randomwalk $iter")
     }
-    
     this
   }
   
   def embedding(): this.type = {
+    logger.warn(s"Begin embedding!")
     val randomPaths = randomWalkPaths.map { case (vertexId, pathBuffer) =>
       Try(pathBuffer.map(_.toString).toIterable).getOrElse(null)
     }.filter(_!=null)
@@ -159,7 +167,7 @@ object Node2vec extends Serializable {
               Try(pathBuffer.mkString("\t")).getOrElse(null)
             }
             .filter(x => x != null && x.replaceAll("\\s", "").length > 0)
-            .repartition(200)
+            .repartition(NUM_PARTITION)
             .saveAsTextFile(config.output)
     
     this
@@ -184,11 +192,11 @@ object Node2vec extends Serializable {
       
       node2vector.join(id2Node)
               .map { case (nodeId, (vector, name)) => s"$name\t$vector" }
-              .repartition(200)
+              .repartition(NUM_PARTITION)
               .saveAsTextFile(s"${config.output}.emb")
     } else {
       node2vector.map { case (nodeId, vector) => s"$nodeId\t$vector" }
-              .repartition(200)
+              .repartition(NUM_PARTITION)
               .saveAsTextFile(s"${config.output}.emb")
     }
     
