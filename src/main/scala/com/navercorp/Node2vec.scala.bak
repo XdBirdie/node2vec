@@ -5,7 +5,7 @@ import java.io.Serializable
 import scala.util.Try
 import scala.collection.mutable.ArrayBuffer
 import org.slf4j.{Logger, LoggerFactory}
-import org.apache.spark.{HashPartitioner, Partitioner, SparkContext}
+import org.apache.spark.SparkContext
 import org.apache.spark.rdd.RDD
 import org.apache.spark.graphx.{EdgeTriplet, Graph, _}
 import com.navercorp.graph.{GraphOps, EdgeAttr, NodeAttr}
@@ -21,7 +21,7 @@ object Node2vec extends Serializable {
   var graph: Graph[NodeAttr, EdgeAttr] = _
   var randomWalkPaths: RDD[(Long, ArrayBuffer[Long])] = null
 
-  val NUM_PARTITIONS = 16
+  val NUM_PARTITION = 16
 
   def setup(context: SparkContext, param: Main.Params): this.type = {
     this.context = context
@@ -50,18 +50,17 @@ object Node2vec extends Serializable {
       }
         
       (nodeId, NodeAttr(neighbors = neighbors_.distinct))
-    }.repartition(NUM_PARTITIONS).cache
+    }.repartition(NUM_PARTITION).cache
     
     indexedEdges = indexedNodes.flatMap { case (srcId, clickNode) =>
       clickNode.neighbors.map { case (dstId, weight) =>
           Edge(srcId, dstId, EdgeAttr())
       }
-    }.repartition(NUM_PARTITIONS).cache
+    }.repartition(NUM_PARTITION).cache
     
     this
   }
   
-
   def initTransitionProb(): this.type = {
     val bcP = context.broadcast(config.p)
     val bcQ = context.broadcast(config.q)
@@ -82,39 +81,41 @@ object Node2vec extends Serializable {
               
               edgeTriplet.attr
             }.cache
+    
     this
   }
   
   def randomWalk(): this.type = {
-    val partitioner = new HashPartitioner(NUM_PARTITIONS)
-
-    val edge2attr: RDD[((VertexId, VertexId), EdgeAttr)] = graph.triplets.map { 
-      edgeTriplet: EdgeTriplet[NodeAttr, EdgeAttr] =>
+    // val edge2attr = graph.triplets.map { edgeTriplet =>
+    //   (s"${edgeTriplet.srcId}${edgeTriplet.dstId}", edgeTriplet.attr)
+    // }.repartition(NUM_PARTITION).cache
+    val edge2attr = graph.triplets.map { edgeTriplet =>
       ((edgeTriplet.srcId, edgeTriplet.dstId), edgeTriplet.attr)
-    }.partitionBy(partitioner).cache
+    }.repartition(200).cache
     edge2attr.first
     
     for (iter <- 0 until config.numWalks) {
       logger.warn(s"Begin randomwalk $iter")
       var prevWalk: RDD[(Long, ArrayBuffer[Long])] = null
-      var randomWalk: RDD[(VertexId, ArrayBuffer[VertexId])] = graph.vertices.map { case (nodeId, clickNode) =>
+      var randomWalk = graph.vertices.map { case (nodeId, clickNode) =>
         val pathBuffer = new ArrayBuffer[Long]()
         pathBuffer.append(clickNode.path:_*)
-        (nodeId, pathBuffer)
+        (nodeId, pathBuffer) 
       }.cache
 
-      var activeWalks: (VertexId, ArrayBuffer[VertexId]) = randomWalk.first
+      var activeWalks = randomWalk.first
       graph.unpersist(blocking = false)
       graph.edges.unpersist(blocking = false)
-
+      
       for (walkCount <- 0 until config.walkLength) {
         prevWalk = randomWalk
-        val tempWalk: RDD[((VertexId, VertexId), (VertexId, ArrayBuffer[VertexId]))] = randomWalk.map { case (srcNodeId, pathBuffer) =>
-          val prevNodeId: VertexId = pathBuffer(pathBuffer.length - 2)
-          val currentNodeId: VertexId = pathBuffer.last
+        val tempWalk = randomWalk.map { case (srcNodeId, pathBuffer) =>
+          val prevNodeId = pathBuffer(pathBuffer.length - 2)
+          val currentNodeId = pathBuffer.last
 
+          // (s"$prevNodeId$currentNodeId", (srcNodeId, pathBuffer))
           ((prevNodeId, currentNodeId), (srcNodeId, pathBuffer))
-        }.partitionBy(partitioner)
+        }
 
         randomWalk = edge2attr.join(tempWalk).map { case (edge, (attr, (srcNodeId, pathBuffer))) =>
           try {
@@ -131,6 +132,8 @@ object Node2vec extends Serializable {
         activeWalks = randomWalk.first()
         prevWalk.unpersist(blocking=false)
       }
+
+
       if (randomWalkPaths != null) {
         val prevRandomWalkPaths = randomWalkPaths
         randomWalkPaths = randomWalkPaths.union(randomWalk).cache()
@@ -167,7 +170,7 @@ object Node2vec extends Serializable {
               Try(pathBuffer.mkString("\t")).getOrElse(null)
             }
             .filter(x => x != null && x.replaceAll("\\s", "").length > 0)
-            .repartition(NUM_PARTITIONS)
+            .repartition(NUM_PARTITION)
             .saveAsTextFile(config.output)
     
     this
@@ -192,11 +195,11 @@ object Node2vec extends Serializable {
       
       node2vector.join(id2Node)
               .map { case (nodeId, (vector, name)) => s"$name\t$vector" }
-              .repartition(NUM_PARTITIONS)
+              .repartition(NUM_PARTITION)
               .saveAsTextFile(s"${config.output}.emb")
     } else {
       node2vector.map { case (nodeId, vector) => s"$nodeId\t$vector" }
-              .repartition(NUM_PARTITIONS)
+              .repartition(NUM_PARTITION)
               .saveAsTextFile(s"${config.output}.emb")
     }
     
