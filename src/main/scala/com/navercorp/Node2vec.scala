@@ -26,7 +26,6 @@ object Node2vec extends Serializable {
   def setup(context: SparkContext, param: Main.Params): this.type = {
     this.context = context
     this.config = param
-    
     this
   }
   
@@ -103,18 +102,22 @@ object Node2vec extends Serializable {
         pathBuffer.append(clickNode.path:_*)
         (nodeId, pathBuffer) 
       }.cache
+
       var activeWalks = randomWalk.first
       graph.unpersist(blocking = false)
       graph.edges.unpersist(blocking = false)
+      
       for (walkCount <- 0 until config.walkLength) {
         prevWalk = randomWalk
-        randomWalk = randomWalk.map { case (srcNodeId, pathBuffer) =>
+        val tempWalk = randomWalk.map { case (srcNodeId, pathBuffer) =>
           val prevNodeId = pathBuffer(pathBuffer.length - 2)
           val currentNodeId = pathBuffer.last
 
           // (s"$prevNodeId$currentNodeId", (srcNodeId, pathBuffer))
           ((prevNodeId, currentNodeId), (srcNodeId, pathBuffer))
-        }.join(edge2attr).map { case (edge, ((srcNodeId, pathBuffer), attr)) =>
+        }
+
+        randomWalk = edge2attr.join(tempWalk).map { case (edge, (attr, (srcNodeId, pathBuffer))) =>
           try {
             val nextNodeIndex = GraphOps.drawAlias(attr.J, attr.q)
             val nextNodeId = attr.dstNeighbors(nextNodeIndex)

@@ -93,6 +93,8 @@ object Main {
     parser.parse(args, defaultParams).map { param =>
       val conf = new SparkConf().setAppName("Node2Vec")
       val context: SparkContext = new SparkContext(conf)
+      // 设置log级别
+      context.setLogLevel("WARN")
       
       Node2vec.setup(context, param)
       
