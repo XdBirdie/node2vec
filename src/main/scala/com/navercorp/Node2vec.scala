@@ -91,7 +91,7 @@ object Node2vec extends Serializable {
     val edge2attr: RDD[((VertexId, VertexId), EdgeAttr)] = graph.triplets.map { 
       edgeTriplet: EdgeTriplet[NodeAttr, EdgeAttr] =>
       ((edgeTriplet.srcId, edgeTriplet.dstId), edgeTriplet.attr)
-    }.partitionBy(partitioner).cache
+    }.repartition(NUM_PARTITIONS).cache //partitionBy(partitioner).cache
     edge2attr.first
     
     for (iter <- 0 until config.numWalks) {
@@ -114,7 +114,7 @@ object Node2vec extends Serializable {
           val currentNodeId: VertexId = pathBuffer.last
 
           ((prevNodeId, currentNodeId), (srcNodeId, pathBuffer))
-        }.partitionBy(partitioner)
+        }.repartition(NUM_PARTITIONS).cache //.partitionBy(partitioner)
 
         randomWalk = edge2attr.join(tempWalk).map { case (edge, (attr, (srcNodeId, pathBuffer))) =>
           try {
