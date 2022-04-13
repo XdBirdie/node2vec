@@ -89,29 +89,31 @@ object Main {
     )
   }
   
-  def main(args: Array[String]) = {
+  def main(args: Array[String]):Unit = {
     parser.parse(args, defaultParams).map { param =>
-      val conf = new SparkConf().setAppName("Node2Vec")
+      val conf = new SparkConf().setAppName("com.navercorp.Node2Vec")
       val context: SparkContext = new SparkContext(conf)
       // 设置log级别
       context.setLogLevel("WARN")
-      
-      Node2vec.setup(context, param)
+
+      var N2V: Node2Vec = N2VPartition
+
+      N2V.setup(context, param)
       
       param.cmd match {
-        case Command.node2vec => Node2vec.load()
+        case Command.node2vec => N2V.load()
                                          .initTransitionProb()
                                          .randomWalk()
                                          .embedding()
                                          .save()
-        case Command.randomwalk => Node2vec.load()
+        case Command.randomwalk => N2V.load()
                                            .initTransitionProb()
                                            .randomWalk()
                                            .saveRandomPath()
         case Command.embedding => {
           val randomPaths = Word2vec.setup(context, param).read(param.input)
           Word2vec.fit(randomPaths).save(param.output)
-          Node2vec.loadNode2Id(param.nodePath).saveVectors()
+          N2V.loadNode2Id(param.nodePath).saveVectors()
         }
       }
     } getOrElse {
