@@ -8,12 +8,14 @@ import org.slf4j.{Logger, LoggerFactory}
 import org.apache.spark.{HashPartitioner, Partitioner, SparkContext}
 import org.apache.spark.rdd.RDD
 import org.apache.spark.graphx.{EdgeTriplet, Graph, _}
-import com.navercorp.graph.{GraphOps, EdgeAttr, NodeAttr}
+import com.navercorp.graph.{EdgeAttr, GraphOps, NodeAttr}
+import com.navercorp.util.TimeRecorder
 
 object N2VPartition extends Node2Vec {
   lazy val logger: Logger = LoggerFactory.getLogger(getClass.getName);
   
   var context: SparkContext = null
+
   var config: Main.Params = null
   var node2id: RDD[(String, Long)] = null
   var indexedEdges: RDD[Edge[EdgeAttr]] = _
@@ -86,16 +88,21 @@ object N2VPartition extends Node2Vec {
   }
   
   def randomWalk(): this.type = {
+    TimeRecorder("Begin randomWalk")
+
     val partitioner = new HashPartitioner(NUM_PARTITIONS)
 
     val edge2attr: RDD[((VertexId, VertexId), EdgeAttr)] = graph.triplets.map { 
       edgeTriplet: EdgeTriplet[NodeAttr, EdgeAttr] =>
       ((edgeTriplet.srcId, edgeTriplet.dstId), edgeTriplet.attr)
     }.partitionBy(partitioner).cache
-    edge2attr.first
+    edge2attr.count()
+
+    TimeRecorder("edge2attr Finishes!")
     
     for (iter <- 0 until config.numWalks) {
-      logger.warn(s"Begin randomwalk $iter")
+      TimeRecorder(s"Begin random walk: $iter")
+
       var prevWalk: RDD[(Long, ArrayBuffer[Long])] = null
       var randomWalk: RDD[(VertexId, ArrayBuffer[VertexId])] = graph.vertices.map { case (nodeId, clickNode) =>
         val pathBuffer = new ArrayBuffer[Long]()
@@ -103,20 +110,27 @@ object N2VPartition extends Node2Vec {
         (nodeId, pathBuffer)
       }.cache
 
-      var activeWalks: (VertexId, ArrayBuffer[VertexId]) = randomWalk.first
+      TimeRecorder(s"randomWalk RDD init finish")
+
+      randomWalk.count()
       graph.unpersist(blocking = false)
       graph.edges.unpersist(blocking = false)
 
       for (walkCount <- 0 until config.walkLength) {
         prevWalk = randomWalk
-        val tempWalk: RDD[((VertexId, VertexId), (VertexId, ArrayBuffer[VertexId]))] = randomWalk.map { case (srcNodeId, pathBuffer) =>
+        val tempWalk = randomWalk.map { case (srcNodeId, pathBuffer) =>
           val prevNodeId: VertexId = pathBuffer(pathBuffer.length - 2)
           val currentNodeId: VertexId = pathBuffer.last
 
           ((prevNodeId, currentNodeId), (srcNodeId, pathBuffer))
         }.partitionBy(partitioner)
 
-        randomWalk = edge2attr.join(tempWalk, partitioner).map { case (edge, (attr, (srcNodeId, pathBuffer))) =>
+        TimeRecorder(s"$walkCount: begin join")
+        val joinWalk = edge2attr.join(tempWalk, partitioner)
+        TimeRecorder(s"$walkCount: end join")
+
+        TimeRecorder(s"$walkCount: begin joinWalk map")
+        randomWalk = joinWalk.map { case (edge, (attr, (srcNodeId, pathBuffer))) =>
           try {
             val nextNodeIndex = GraphOps.drawAlias(attr.J, attr.q)
             val nextNodeId = attr.dstNeighbors(nextNodeIndex)
@@ -127,10 +141,13 @@ object N2VPartition extends Node2Vec {
             case e: Exception => throw new RuntimeException(e.getMessage)
           }
         }.cache
+        TimeRecorder(s"$walkCount: end joinWalk map")
 
-        activeWalks = randomWalk.first()
+        randomWalk.count()
         prevWalk.unpersist(blocking=false)
       }
+
+
       if (randomWalkPaths != null) {
         val prevRandomWalkPaths = randomWalkPaths
         randomWalkPaths = randomWalkPaths.union(randomWalk).cache()
@@ -139,19 +156,22 @@ object N2VPartition extends Node2Vec {
       } else {
         randomWalkPaths = randomWalk
       }
-      logger.warn(s"End randomwalk $iter")
+
+      TimeRecorder(s"End random walk: $iter")
     }
     this
   }
   
   def embedding(): this.type = {
-    logger.warn(s"Begin embedding!")
+    TimeRecorder("Begin embedding")
+
     val randomPaths = randomWalkPaths.map { case (vertexId, pathBuffer) =>
       Try(pathBuffer.map(_.toString).toIterable).getOrElse(null)
     }.filter(_!=null)
     
     Word2vec.setup(context, config).fit(randomPaths)
-    
+
+    TimeRecorder("End embedding")
     this
   }
   
@@ -282,7 +302,7 @@ object N2VPartition extends Node2Vec {
     }.filter(_!=null)
   }
   
-  def createNode2Id[T <: Any](triplets: RDD[(String, String, T)]) = triplets.flatMap { case (src, dst, weight) =>
+  def createNode2Id[T <: Any](triplets: RDD[(String, String, T)]): RDD[(String, VertexId)] = triplets.flatMap { case (src, dst, weight) =>
     Try(Array(src, dst)).getOrElse(Array.empty[String])
   }.distinct().zipWithIndex()
 

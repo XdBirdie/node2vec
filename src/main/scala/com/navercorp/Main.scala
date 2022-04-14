@@ -1,16 +1,22 @@
 package com.navercorp
 
 import java.io.Serializable
-import org.apache.spark.{SparkContext, SparkConf}
+import org.apache.spark.{SparkConf, SparkContext}
 import scopt.OptionParser
 import com.navercorp.lib.AbstractParams
+import com.navercorp.util.TimeRecorder
 
 object Main {
   object Command extends Enumeration {
     type Command = Value
     val node2vec, randomwalk, embedding = Value
   }
+  object Version extends Enumeration {
+    type Version = Value
+    val baseline, partition, broadcast, join2 = Value
+  }
   import Command._
+  import Version._
 
   case class Params(iter: Int = 10,
                     lr: Double = 0.025,
@@ -28,11 +34,12 @@ object Main {
                     nodePath: String = null,
                     input: String = null,
                     output: String = null,
-                    cmd: Command = Command.node2vec) extends AbstractParams[Params] with Serializable
-  val defaultParams = Params()
+                    cmd: Command = Command.node2vec,
+                    version: Version = Version.partition) extends AbstractParams[Params] with Serializable
+  val defaultParams: Params = Params()
   
-  val parser = new OptionParser[Params]("Node2Vec_Spark") {
-    head("Main")
+  val parser: OptionParser[Params] = new OptionParser[Params]("Node2Vec_Spark") {
+    head("Node2vec Spark")
     opt[Int]("walkLength")
             .text(s"walkLength: ${defaultParams.walkLength}")
             .action((x, c) => c.copy(walkLength = x))
@@ -72,6 +79,10 @@ object Main {
             .required()
             .text(s"command: ${defaultParams.cmd.toString}")
             .action((x, c) => c.copy(cmd = Command.withName(x)))
+    opt[String]("version")
+            .text(s"version: ${defaultParams.cmd.toString}")
+            .action((x, c) => c.copy(version = Version.withName(x)))
+
     note(
       """
         |For example, the following command runs this app on a synthetic dataset:
@@ -90,26 +101,33 @@ object Main {
   }
   
   def main(args: Array[String]):Unit = {
-    parser.parse(args, defaultParams).map { param =>
-      val conf = new SparkConf().setAppName("com.navercorp.Node2Vec")
+    TimeRecorder.init()
+
+    parser.parse(args, defaultParams).map { param: Params =>
+      val conf: SparkConf = new SparkConf().setAppName("com.navercorp.Node2Vec")
       val context: SparkContext = new SparkContext(conf)
       // 设置log级别
       context.setLogLevel("WARN")
 
-      var N2V: Node2Vec = N2VPartition
+      val N2V: Node2Vec = param.version match {
+        case Version.baseline => N2VBaseline
+        case Version.partition => N2VPartition
+        case Version.broadcast => N2VBroadcast
+        case Version.join2 => N2VJoin2
+      }
 
       N2V.setup(context, param)
-      
+
       param.cmd match {
         case Command.node2vec => N2V.load()
                                          .initTransitionProb()
                                          .randomWalk()
                                          .embedding()
-                                         .save()
+//                                         .save()
         case Command.randomwalk => N2V.load()
                                            .initTransitionProb()
                                            .randomWalk()
-                                           .saveRandomPath()
+//                                           .saveRandomPath()
         case Command.embedding => {
           val randomPaths = Word2vec.setup(context, param).read(param.input)
           Word2vec.fit(randomPaths).save(param.output)
@@ -119,5 +137,8 @@ object Main {
     } getOrElse {
       sys.exit(1)
     }
+
+    TimeRecorder.show()
+    TimeRecorder.save("~/Projects/node2vec-spark/log/test.log")
   }
 }
