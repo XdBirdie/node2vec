@@ -138,7 +138,7 @@ object Main {
       sys.exit(1)
     }
 
-    TimeRecorder.show()
-    TimeRecorder.save("~/Projects/node2vec-spark/log/test.log")
+//     TimeRecorder.show()
+//     TimeRecorder.save("~/Projects/node2vec-spark/log/test.log")
   }
 }

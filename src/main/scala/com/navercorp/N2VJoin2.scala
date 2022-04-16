@@ -114,7 +114,7 @@ object N2VJoin2 extends Node2Vec {
         val pathBuffer = new ArrayBuffer[Long]()
         pathBuffer.append(clickNode.path:_*)
         (nodeId, pathBuffer)
-      }.cache
+      }.partitionBy(partitioner).cache
       randomWalk.count()
       // logger.warn(s"- End randomWalk RDD")
 
