@@ -17,6 +17,7 @@ do
        ./target/node2vec-0.1.2-SNAPSHOT.jar \
        --cmd $cmd --version $version --directed false --indexed false --weighted false \
        --walkLength 20  --numWalks 5 --degree 100 \
+       --numPartition 64 \
        --input graph/$dataset --output emb/Blog.emb > $log_path
 done
 
