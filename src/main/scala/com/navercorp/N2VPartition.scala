@@ -23,15 +23,17 @@ object N2VPartition extends Node2Vec {
   var graph: Graph[NodeAttr, EdgeAttr] = _
   var randomWalkPaths: RDD[(Long, ArrayBuffer[Long])] = null
 
-  val NUM_PARTITIONS = 16
-
   def setup(context: SparkContext, param: Main.Params): this.type = {
+    logger.warn("N2VPartition setup")
+
     this.context = context
     this.config = param
     this
   }
   
   def load(): this.type = {
+    logger.warn("N2VPartition load")
+
     val bcMaxDegree = context.broadcast(config.degree)
     val bcEdgeCreator = config.directed match {
       case true => context.broadcast(GraphOps.createDirectedEdge)
@@ -52,30 +54,32 @@ object N2VPartition extends Node2Vec {
       }
         
       (nodeId, NodeAttr(neighbors = neighbors_.distinct))
-    }.repartition(NUM_PARTITIONS).cache
+    }.repartition(config.numPartition).cache
     
     indexedEdges = indexedNodes.flatMap { case (srcId, clickNode) =>
       clickNode.neighbors.map { case (dstId, weight) =>
           Edge(srcId, dstId, EdgeAttr())
       }
-    }.repartition(NUM_PARTITIONS).cache
+    }.repartition(config.numPartition).cache
     
     this
   }
   
 
   def initTransitionProb(): this.type = {
+    logger.warn("N2VPartition init transition prob")
+
     val bcP = context.broadcast(config.p)
     val bcQ = context.broadcast(config.q)
     
     graph = Graph(indexedNodes, indexedEdges)
             .mapVertices[NodeAttr] { case (vertexId, clickNode) =>
               val (j, q) = GraphOps.setupAlias(clickNode.neighbors)
-              val nextNodeIndex = GraphOps.drawAlias(j, q)
+              val nextNodeIndex: Int = GraphOps.drawAlias(j, q)
               clickNode.path = Array(vertexId, clickNode.neighbors(nextNodeIndex)._1)
               
               clickNode
-            }
+            }.cache()
             .mapTriplets { edgeTriplet: EdgeTriplet[NodeAttr, EdgeAttr] =>
               val (j, q) = GraphOps.setupEdgeAlias(bcP.value, bcQ.value)(edgeTriplet.srcId, edgeTriplet.srcAttr.neighbors, edgeTriplet.dstAttr.neighbors)
               edgeTriplet.attr.J = j
@@ -83,25 +87,24 @@ object N2VPartition extends Node2Vec {
               edgeTriplet.attr.dstNeighbors = edgeTriplet.dstAttr.neighbors.map(_._1)
               
               edgeTriplet.attr
-            }.cache
+            }.cache()
     this
   }
   
   def randomWalk(): this.type = {
-    TimeRecorder("Begin randomWalk")
+    logger.warn("N2VPartition random walk")
 
-    val partitioner = new HashPartitioner(NUM_PARTITIONS)
+    val partitioner = new HashPartitioner(config.numPartition)
 
     val edge2attr: RDD[((VertexId, VertexId), EdgeAttr)] = graph.triplets.map { 
       edgeTriplet: EdgeTriplet[NodeAttr, EdgeAttr] =>
       ((edgeTriplet.srcId, edgeTriplet.dstId), edgeTriplet.attr)
-    }.partitionBy(partitioner).cache
+    }.partitionBy(partitioner).cache()
     edge2attr.count()
+    logger.warn("N2VPartition edge2attr set up")
 
-    TimeRecorder("edge2attr Finishes!")
-    
     for (iter <- 0 until config.numWalks) {
-      TimeRecorder(s"Begin random walk: $iter")
+      logger.warn(s"N2VPartition begin random walk ${iter}")
 
       var prevWalk: RDD[(Long, ArrayBuffer[Long])] = null
       var randomWalk: RDD[(VertexId, ArrayBuffer[VertexId])] = graph.vertices.map { case (nodeId, clickNode) =>
@@ -109,12 +112,7 @@ object N2VPartition extends Node2Vec {
         pathBuffer.append(clickNode.path:_*)
         (nodeId, pathBuffer)
       }.cache
-
-      TimeRecorder(s"randomWalk RDD init finish")
-
       randomWalk.count()
-      graph.unpersist(blocking = false)
-      graph.edges.unpersist(blocking = false)
 
       for (walkCount <- 0 until config.walkLength) {
         prevWalk = randomWalk
@@ -125,45 +123,33 @@ object N2VPartition extends Node2Vec {
           ((prevNodeId, currentNodeId), (srcNodeId, pathBuffer))
         }.partitionBy(partitioner)
 
-        TimeRecorder(s"$walkCount: begin join")
-        val joinWalk = edge2attr.join(tempWalk, partitioner)
-        TimeRecorder(s"$walkCount: end join")
+        randomWalk = edge2attr.join(tempWalk, partitioner).map { case (edge, (attr, (srcNodeId, pathBuffer))) =>
+          val nextNodeIndex: Int = GraphOps.drawAlias(attr.J, attr.q)
+          val nextNodeId: VertexId = attr.dstNeighbors(nextNodeIndex)
+          pathBuffer.append(nextNodeId)
 
-        TimeRecorder(s"$walkCount: begin joinWalk map")
-        randomWalk = joinWalk.map { case (edge, (attr, (srcNodeId, pathBuffer))) =>
-          try {
-            val nextNodeIndex = GraphOps.drawAlias(attr.J, attr.q)
-            val nextNodeId = attr.dstNeighbors(nextNodeIndex)
-            pathBuffer.append(nextNodeId)
-
-            (srcNodeId, pathBuffer)
-          } catch {
-            case e: Exception => throw new RuntimeException(e.getMessage)
-          }
-        }.cache
-        TimeRecorder(s"$walkCount: end joinWalk map")
+          (srcNodeId, pathBuffer)
+        }.cache()
 
         randomWalk.count()
         prevWalk.unpersist(blocking=false)
       }
 
-
       if (randomWalkPaths != null) {
-        val prevRandomWalkPaths = randomWalkPaths
+        val prevRandomWalkPaths: RDD[(VertexId, ArrayBuffer[VertexId])] = randomWalkPaths
         randomWalkPaths = randomWalkPaths.union(randomWalk).cache()
-        randomWalkPaths.first
+        randomWalkPaths.count()
         prevRandomWalkPaths.unpersist(blocking = false)
       } else {
         randomWalkPaths = randomWalk
       }
-
-      TimeRecorder(s"End random walk: $iter")
     }
+    logger.warn(s"End random walk")
     this
   }
   
   def embedding(): this.type = {
-    TimeRecorder("Begin embedding")
+    logger.warn(s"N2VPartition begin embedding")
 
     val randomPaths = randomWalkPaths.map { case (vertexId, pathBuffer) =>
       Try(pathBuffer.map(_.toString).toIterable).getOrElse(null)
@@ -171,7 +157,7 @@ object N2VPartition extends Node2Vec {
     
     Word2vec.setup(context, config).fit(randomPaths)
 
-    TimeRecorder("End embedding")
+    logger.warn("N2VPartition end embedding")
     this
   }
   
@@ -187,7 +173,7 @@ object N2VPartition extends Node2Vec {
               Try(pathBuffer.mkString("\t")).getOrElse(null)
             }
             .filter(x => x != null && x.replaceAll("\\s", "").length > 0)
-            .repartition(NUM_PARTITIONS)
+            .repartition(config.numPartition)
             .saveAsTextFile(config.output)
     
     this
@@ -212,11 +198,11 @@ object N2VPartition extends Node2Vec {
       
       node2vector.join(id2Node)
               .map { case (nodeId, (vector, name)) => s"$name\t$vector" }
-              .repartition(NUM_PARTITIONS)
+              .repartition(config.numPartition)
               .saveAsTextFile(s"${config.output}.emb")
     } else {
       node2vector.map { case (nodeId, vector) => s"$nodeId\t$vector" }
-              .repartition(NUM_PARTITIONS)
+              .repartition(config.numPartition)
               .saveAsTextFile(s"${config.output}.emb")
     }
     

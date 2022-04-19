@@ -1,124 +1,111 @@
 package com.navercorp
 
-import com.navercorp.graph.{EdgeAttr, GraphOps, NodeAttr}
-import org.apache.spark.SparkContext
+
+import com.navercorp.N2VOne.bcAliasTable
+import com.navercorp.graph.{GraphOps, NodeAttr}
+import com.navercorp.util.TimeRecorder
+import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.graphx._
 import org.apache.spark.rdd.RDD
+import org.apache.spark.{HashPartitioner, SparkContext}
 import org.slf4j.{Logger, LoggerFactory}
 
+import java.io.Serializable
 import scala.collection.mutable.ArrayBuffer
 import scala.util.Try
 
-object N2VBaseline extends Node2Vec {
+
+
+object N2VOne extends Node2Vec {
+
+  case class AliasAttr(var path: Array[Long] = Array.empty[Long],
+                       var neighbors: Array[(Long, Double)] = Array.empty[(Long, Double)],
+                       var J: Array[Int] = Array.empty[Int],
+                       var q: Array[Double] = Array.empty[Double]) extends Serializable
+
   lazy val logger: Logger = LoggerFactory.getLogger(getClass.getName);
 
   var context: SparkContext = null
+
   var config: Main.Params = null
   var node2id: RDD[(String, Long)] = null
-  var indexedEdges: RDD[Edge[EdgeAttr]] = _
-  var indexedNodes: RDD[(VertexId, NodeAttr)] = _
-  var graph: Graph[NodeAttr, EdgeAttr] = _
+
+  var indexedNodes: RDD[(VertexId, Array[(Long, Double)])] = _
+
   var randomWalkPaths: RDD[(Long, ArrayBuffer[Long])] = null
+
+  var bcAliasTable: Broadcast[Map[VertexId, (Array[VertexId], Array[Int], Array[Double])]] = _
 
   var NUM_PARTITIONS = 64
 
   def setup(context: SparkContext, param: Main.Params): this.type = {
     this.context = context
     this.config = param
-    this.NUM_PARTITIONS = param.numPartition
+    NUM_PARTITIONS = param.numPartition
     this
   }
 
   def load(): this.type = {
-    val bcMaxDegree = context.broadcast(config.degree)
-    val bcEdgeCreator = config.directed match {
-      case true => context.broadcast(GraphOps.createDirectedEdge)
-      case false => context.broadcast(GraphOps.createUndirectedEdge)
-    }
+    val bcEdgeCreator: Broadcast[(VertexId, VertexId, Double) => Array[(VertexId, Array[(VertexId, Double)])]] =
+      if (config.directed) { context.broadcast(GraphOps.createDirectedEdge)}
+      else { context.broadcast(GraphOps.createUndirectedEdge)}
 
-    val inputTriplets: RDD[(Long, Long, Double)] = config.indexed match {
-      case true => readIndexedGraph(config.input)
-      case false => indexingGraph(config.input)
-    }
+    val inputTriplets: RDD[(Long, Long, Double)] =
+      if (config.indexed) { readIndexedGraph(config.input)}
+      else { indexingGraph(config.input) }
 
     indexedNodes = inputTriplets.flatMap { case (srcId, dstId, weight) =>
       bcEdgeCreator.value.apply(srcId, dstId, weight)
-    }.reduceByKey(_++_).map { case (nodeId, neighbors: Array[(VertexId, Double)]) =>
-      var neighbors_ = neighbors
-      if (neighbors_.length > bcMaxDegree.value) {
-        neighbors_ = neighbors.sortWith{ case (left, right) => left._2 > right._2 }.slice(0, bcMaxDegree.value)
-      }
+    }.reduceByKey(_++_).cache()
 
-      (nodeId, NodeAttr(neighbors = neighbors_.distinct))
-    }.repartition(NUM_PARTITIONS).cache
-
-    indexedEdges = indexedNodes.flatMap { case (srcId, clickNode) =>
-      clickNode.neighbors.map { case (dstId, weight) =>
-        Edge(srcId, dstId, EdgeAttr())
-      }
-    }.repartition(NUM_PARTITIONS).cache
-
+    indexedNodes.count()
     this
   }
+
 
   def initTransitionProb(): this.type = {
-    val bcP = context.broadcast(config.p)
-    val bcQ = context.broadcast(config.q)
-
-    graph = Graph(indexedNodes, indexedEdges)
-      .mapVertices[NodeAttr] { case (vertexId, clickNode) =>
-        val (j, q) = GraphOps.setupAlias(clickNode.neighbors)
-        val nextNodeIndex = GraphOps.drawAlias(j, q)
-        clickNode.path = Array(vertexId, clickNode.neighbors(nextNodeIndex)._1)
-
-        clickNode
+    val aliasRDD: RDD[(VertexId, (Array[VertexId], Array[Int], Array[Double]))] =
+      indexedNodes.map {
+        case (vertexId: VertexId, neighbors: Array[(VertexId, Double)]) =>
+          val (j, q) = GraphOps.setupAlias(neighbors)
+          (vertexId, (neighbors.map((_: (VertexId, Double))._1), j, q))
       }
-      .mapTriplets { edgeTriplet: EdgeTriplet[NodeAttr, EdgeAttr] =>
-        val (j, q) = GraphOps.setupEdgeAlias(bcP.value, bcQ.value)(edgeTriplet.srcId, edgeTriplet.srcAttr.neighbors, edgeTriplet.dstAttr.neighbors)
-        edgeTriplet.attr.J = j
-        edgeTriplet.attr.q = q
-        edgeTriplet.attr.dstNeighbors = edgeTriplet.dstAttr.neighbors.map(_._1)
 
-        edgeTriplet.attr
-      }.cache
+    val aliasTable: Map[VertexId, (Array[VertexId], Array[Int], Array[Double])] = aliasRDD.collect().toMap
+    bcAliasTable = this.context.broadcast(aliasTable)
 
     this
   }
 
-  def randomWalk(): this.type = {
-    val edge2attr = graph.triplets.map { edgeTriplet =>
-      (s"${edgeTriplet.srcId}${edgeTriplet.dstId}", edgeTriplet.attr)
-    }.repartition(NUM_PARTITIONS).cache
-    edge2attr.count()
-
+  def randomWalk(bcAliasTable: Broadcast[Map[VertexId, (Array[VertexId], Array[Int], Array[Double])]]): this.type = {
     for (iter <- 0 until config.numWalks) {
+      logger.warn(s"Begin random walk: $iter")
+
       var prevWalk: RDD[(Long, ArrayBuffer[Long])] = null
-      var randomWalk = graph.vertices.map { case (nodeId, clickNode) =>
-        val pathBuffer = new ArrayBuffer[Long]()
-        pathBuffer.append(clickNode.path:_*)
-        (nodeId, pathBuffer)
-      }.cache
+      var randomWalk: RDD[(VertexId, ArrayBuffer[VertexId])] =
+        indexedNodes.map { case (nodeId: VertexId, _) =>
+          val pathBuffer = new ArrayBuffer[VertexId]()
+          pathBuffer.append(nodeId)
+          (nodeId, pathBuffer)
+        }.cache
+
       randomWalk.count()
-      graph.unpersist(blocking = false)
-      graph.edges.unpersist(blocking = false)
+
       for (walkCount <- 0 until config.walkLength) {
         prevWalk = randomWalk
-        randomWalk = randomWalk.map { case (srcNodeId, pathBuffer) =>
-          val prevNodeId = pathBuffer(pathBuffer.length - 2)
-          val currentNodeId = pathBuffer.last
 
-          (s"$prevNodeId$currentNodeId", (srcNodeId, pathBuffer))
-        }.join(edge2attr).map { case (edge, ((srcNodeId, pathBuffer), attr)) =>
-          try {
-            val nextNodeIndex = GraphOps.drawAlias(attr.J, attr.q)
-            val nextNodeId = attr.dstNeighbors(nextNodeIndex)
-            pathBuffer.append(nextNodeId)
+        randomWalk = randomWalk.mapValues { pathBuffer: ArrayBuffer[VertexId] => {
+          val currentNodeId: VertexId = pathBuffer.last
 
-            (srcNodeId, pathBuffer)
-          } catch {
-            case e: Exception => throw new RuntimeException(e.getMessage)
-          }
-        }.cache
+          val (neighbours, j, q) = bcAliasTable.value(currentNodeId)
+
+          val nextNodeIndex: Int = GraphOps.drawAlias(j, q)
+          val nextNodeId: VertexId = neighbours(nextNodeIndex)
+          pathBuffer.append(nextNodeId)
+
+          pathBuffer
+        }
+        }.cache()
 
         randomWalk.count()
         prevWalk.unpersist(blocking=false)
@@ -126,23 +113,36 @@ object N2VBaseline extends Node2Vec {
 
 
       if (randomWalkPaths != null) {
-        val prevRandomWalkPaths = randomWalkPaths
+        val prevRandomWalkPaths: RDD[(VertexId, ArrayBuffer[VertexId])] = randomWalkPaths
         randomWalkPaths = randomWalkPaths.union(randomWalk).cache()
         randomWalkPaths.count()
         prevRandomWalkPaths.unpersist(blocking = false)
       } else {
         randomWalkPaths = randomWalk
       }
-    }
 
+      logger.warn(s"End random walk: $iter")
+    }
+    this
+  }
+
+  def randomWalk(): this.type = {
+    logger.warn("N2VOne Begin random walk")
+    randomWalk(this.bcAliasTable)
+    logger.warn("N2VOne End random walk")
     this
   }
 
   def embedding(): this.type = {
-    val randomPaths: RDD[Iterable[String]] = randomWalkPaths.map { case (vertexId, pathBuffer) =>
+    logger.warn("Begin embedding")
+
+    val randomPaths = randomWalkPaths.map { case (vertexId, pathBuffer) =>
       Try(pathBuffer.map(_.toString).toIterable).getOrElse(null)
     }.filter(_!=null)
+
     Word2vec.setup(context, config).fit(randomPaths)
+
+    logger.warn("End embedding")
     this
   }
 
@@ -196,11 +196,8 @@ object N2VBaseline extends Node2Vec {
 
   def cleanup(): this.type = {
     node2id.unpersist(blocking = false)
-    indexedEdges.unpersist(blocking = false)
     indexedNodes.unpersist(blocking = false)
-    graph.unpersist(blocking = false)
     randomWalkPaths.unpersist(blocking = false)
-
     this
   }
 
@@ -219,9 +216,9 @@ object N2VBaseline extends Node2Vec {
   }
 
   def readIndexedGraph(tripletPath: String) = {
-    val bcWeighted = context.broadcast(config.weighted)
+    val bcWeighted: Broadcast[Boolean] = context.broadcast(config.weighted)
 
-    val rawTriplets = context.textFile(tripletPath)
+    val rawTriplets: RDD[String] = context.textFile(tripletPath)
     if (config.nodePath == null) {
       this.node2id = createNode2Id(rawTriplets.map { triplet =>
         val parts = triplet.split("\\s")
@@ -273,7 +270,7 @@ object N2VBaseline extends Node2Vec {
     }.filter(_!=null)
   }
 
-  def createNode2Id[T <: Any](triplets: RDD[(String, String, T)]) = triplets.flatMap { case (src, dst, weight) =>
+  def createNode2Id[T <: Any](triplets: RDD[(String, String, T)]): RDD[(String, VertexId)] = triplets.flatMap { case (src, dst, weight) =>
     Try(Array(src, dst)).getOrElse(Array.empty[String])
   }.distinct().zipWithIndex()
 

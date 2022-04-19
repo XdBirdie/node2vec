@@ -13,7 +13,7 @@ object Main {
   }
   object Version extends Enumeration {
     type Version = Value
-    val baseline, partition, broadcast, join2 = Value
+    val baseline, partition, broadcast, join2, one = Value
   }
   import Command._
   import Version._
@@ -114,9 +114,11 @@ object Main {
         case Version.partition => N2VPartition
         case Version.broadcast => N2VBroadcast
         case Version.join2 => N2VJoin2
+        case Version.one => N2VOne
       }
 
       N2V.setup(context, param)
+      println(param)
 
       param.cmd match {
         case Command.node2vec => N2V.load()

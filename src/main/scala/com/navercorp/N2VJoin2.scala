@@ -23,16 +23,19 @@ object N2VJoin2 extends Node2Vec {
   var graph: Graph[NodeAttr, EdgeAttr] = _
   var randomWalkPaths: RDD[(Long, ArrayBuffer[Long])] = null
 
-  val NUM_PARTITIONS = 16
+  var NUM_PARTITIONS = 64
+  var partitioner: HashPartitioner = null
 
   def setup(context: SparkContext, param: Main.Params): this.type = {
     this.context = context
     this.config = param
+    this.NUM_PARTITIONS = param.numPartition
+    this.partitioner = new HashPartitioner(NUM_PARTITIONS)
     this
   }
 
   def load(): this.type = {
-    val bcMaxDegree = context.broadcast(config.degree)
+    val bcMaxDegree: Broadcast[Int] = context.broadcast(config.degree)
     val bcEdgeCreator = config.directed match {
       case true => context.broadcast(GraphOps.createDirectedEdge)
       case false => context.broadcast(GraphOps.createUndirectedEdge)
@@ -52,7 +55,7 @@ object N2VJoin2 extends Node2Vec {
       }
 
       (nodeId, NodeAttr(neighbors = neighbors_.distinct))
-    }.repartition(NUM_PARTITIONS).cache
+    }.partitionBy(this.partitioner).cache
 
     indexedEdges = indexedNodes.flatMap { case (srcId, clickNode) =>
       clickNode.neighbors.map { case (dstId, weight) =>
@@ -91,9 +94,6 @@ object N2VJoin2 extends Node2Vec {
 
   def randomWalk(): this.type = {
     logger.warn("# Begin randomWalk")
-    TimeRecorder("Begin randomWalk")
-
-    val partitioner = new HashPartitioner(NUM_PARTITIONS)
 
     logger.warn("# Begin edge2attr")
     val edge2attr: RDD[((VertexId, VertexId), EdgeAttr)] = graph.triplets.map {
@@ -107,7 +107,6 @@ object N2VJoin2 extends Node2Vec {
 
     for (iter <- 0 until config.numWalks) {
       logger.warn(s"# Begin walk ${iter}")
-      TimeRecorder(s"Begin random walk: $iter")
 
       var prevWalk: RDD[(Long, ArrayBuffer[Long])] = null
       var randomWalk: RDD[(VertexId, ArrayBuffer[VertexId])] = graph.vertices.map { case (nodeId, clickNode) =>
@@ -116,12 +115,6 @@ object N2VJoin2 extends Node2Vec {
         (nodeId, pathBuffer)
       }.partitionBy(partitioner).cache
       randomWalk.count()
-      // logger.warn(s"- End randomWalk RDD")
-
-      TimeRecorder(s"randomWalk RDD init finish")
-
-      graph.unpersist(blocking = false)
-      graph.edges.unpersist(blocking = false)
 
       for (walkCount <- 0 until config.walkLength) {
         prevWalk = randomWalk.cache
@@ -133,43 +126,39 @@ object N2VJoin2 extends Node2Vec {
             ((prevNodeId, currentNodeId), srcNodeId)
           }.partitionBy(partitioner)
 
-        val joinWalk = edge2attr.join(tmpWalk, partitioner)
-
-        val newWalk: RDD[(VertexId, VertexId)] = joinWalk.map { case (edge, (attr, srcNodeId)) =>
-          val nextNodeIndex: Int = GraphOps.drawAlias(attr.J, attr.q)
-          val nextNodeId: VertexId = attr.dstNeighbors(nextNodeIndex)
-          (srcNodeId, nextNodeId)
+        val newWalk: RDD[(VertexId, VertexId)] = edge2attr.join(tmpWalk, partitioner).map {
+          case (edge, (attr, srcNodeId)) =>
+            val nextNodeIndex: Int = GraphOps.drawAlias(attr.J, attr.q)
+            val nextNodeId: VertexId = attr.dstNeighbors(nextNodeIndex)
+            (srcNodeId, nextNodeId)
         }.partitionBy(partitioner)
 
 
         randomWalk = randomWalk.join(newWalk).mapValues {
           case (pathBuffer, newNodeId) => pathBuffer += newNodeId
         }
-
         randomWalk.cache()
 
         randomWalk.count()
-        // logger.warn(s"- End randomWalk first")
         prevWalk.unpersist(blocking=false)
       }
 
 
       if (randomWalkPaths != null) {
-        val prevRandomWalkPaths = randomWalkPaths
+        val prevRandomWalkPaths: RDD[(VertexId, ArrayBuffer[VertexId])] = randomWalkPaths
         randomWalkPaths = randomWalkPaths.union(randomWalk).cache()
         randomWalkPaths.count()
         prevRandomWalkPaths.unpersist(blocking = false)
       } else {
         randomWalkPaths = randomWalk
       }
-
-      TimeRecorder(s"End random walk: $iter")
     }
+    logger.warn("End random walk")
     this
   }
 
   def embedding(): this.type = {
-    TimeRecorder("Begin embedding")
+    logger.warn("Begin embedding")
 
     val randomPaths = randomWalkPaths.map { case (vertexId, pathBuffer) =>
       Try(pathBuffer.map(_.toString).toIterable).getOrElse(null)
@@ -177,7 +166,7 @@ object N2VJoin2 extends Node2Vec {
 
     Word2vec.setup(context, config).fit(randomPaths)
 
-    TimeRecorder("End embedding")
+    logger.warn("End embedding")
     this
   }
 
