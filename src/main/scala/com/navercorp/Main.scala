@@ -80,8 +80,11 @@ object Main {
             .text(s"command: ${defaultParams.cmd.toString}")
             .action((x, c) => c.copy(cmd = Command.withName(x)))
     opt[String]("version")
-            .text(s"version: ${defaultParams.cmd.toString}")
+            .text(s"version: ${defaultParams.version.toString}")
             .action((x, c) => c.copy(version = Version.withName(x)))
+    opt[Int]("partitions")
+            .text(s"partitions: ${defaultParams.numPartition}")
+            .action((x, c) => c.copy(numPartition=x))
 
     note(
       """

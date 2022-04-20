@@ -92,6 +92,7 @@ object N2VBaseline extends Node2Vec {
     edge2attr.count()
 
     for (iter <- 0 until config.numWalks) {
+      logger.warn(s"Begin random walk $iter")
       var prevWalk: RDD[(Long, ArrayBuffer[Long])] = null
       var randomWalk = graph.vertices.map { case (nodeId, clickNode) =>
         val pathBuffer = new ArrayBuffer[Long]()
@@ -102,6 +103,7 @@ object N2VBaseline extends Node2Vec {
       graph.unpersist(blocking = false)
       graph.edges.unpersist(blocking = false)
       for (walkCount <- 0 until config.walkLength) {
+
         prevWalk = randomWalk
         randomWalk = randomWalk.map { case (srcNodeId, pathBuffer) =>
           val prevNodeId = pathBuffer(pathBuffer.length - 2)
