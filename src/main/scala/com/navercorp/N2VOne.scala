@@ -1,35 +1,25 @@
 package com.navercorp
 
 
-import com.navercorp.N2VOne.bcAliasTable
-import com.navercorp.graph.{GraphOps, NodeAttr}
-import com.navercorp.util.TimeRecorder
+import com.navercorp.graph.GraphOps
+import org.apache.spark.SparkContext
 import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.graphx._
 import org.apache.spark.rdd.RDD
-import org.apache.spark.{HashPartitioner, SparkContext}
 import org.slf4j.{Logger, LoggerFactory}
 
-import java.io.Serializable
 import scala.collection.mutable.ArrayBuffer
 import scala.util.Try
 
 
 
 object N2VOne extends Node2Vec {
-
-  case class AliasAttr(var path: Array[Long] = Array.empty[Long],
-                       var neighbors: Array[(Long, Double)] = Array.empty[(Long, Double)],
-                       var J: Array[Int] = Array.empty[Int],
-                       var q: Array[Double] = Array.empty[Double]) extends Serializable
-
   lazy val logger: Logger = LoggerFactory.getLogger(getClass.getName);
 
   var context: SparkContext = null
 
   var config: Main.Params = null
   var node2id: RDD[(String, Long)] = null
-
   var indexedNodes: RDD[(VertexId, Array[(Long, Double)])] = _
 
   var randomWalkPaths: RDD[(Long, ArrayBuffer[Long])] = null
@@ -64,16 +54,16 @@ object N2VOne extends Node2Vec {
 
 
   def initTransitionProb(): this.type = {
-    val aliasRDD: RDD[(VertexId, (Array[VertexId], Array[Int], Array[Double]))] =
+    val aliasRDD: RDD[(VertexId, (Array[VertexId], Array[Int], Array[Double]))] = {
       indexedNodes.map {
         case (vertexId: VertexId, neighbors: Array[(VertexId, Double)]) =>
           val (j, q) = GraphOps.setupAlias(neighbors)
           (vertexId, (neighbors.map((_: (VertexId, Double))._1), j, q))
       }
+    }
 
     val aliasTable: Map[VertexId, (Array[VertexId], Array[Int], Array[Double])] = aliasRDD.collect().toMap
     bcAliasTable = this.context.broadcast(aliasTable)
-
     this
   }
 
@@ -95,16 +85,15 @@ object N2VOne extends Node2Vec {
         prevWalk = randomWalk
 
         randomWalk = randomWalk.mapValues { pathBuffer: ArrayBuffer[VertexId] => {
-          val currentNodeId: VertexId = pathBuffer.last
+            val currentNodeId: VertexId = pathBuffer.last
 
-          val (neighbours, j, q) = bcAliasTable.value(currentNodeId)
+            val (neighbours, j, q) = bcAliasTable.value(currentNodeId)
+            val nextNodeIndex: Int = GraphOps.drawAlias(j, q)
+            val nextNodeId: VertexId = neighbours(nextNodeIndex)
+            pathBuffer.append(nextNodeId)
 
-          val nextNodeIndex: Int = GraphOps.drawAlias(j, q)
-          val nextNodeId: VertexId = neighbours(nextNodeIndex)
-          pathBuffer.append(nextNodeId)
-
-          pathBuffer
-        }
+            pathBuffer
+          }
         }.cache()
 
         randomWalk.count()

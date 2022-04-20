@@ -86,6 +86,7 @@ object N2VBaseline extends Node2Vec {
   }
 
   def randomWalk(): this.type = {
+    logger.warn("Begin random walk")
     val edge2attr = graph.triplets.map { edgeTriplet =>
       (s"${edgeTriplet.srcId}${edgeTriplet.dstId}", edgeTriplet.attr)
     }.repartition(NUM_PARTITIONS).cache
@@ -103,17 +104,16 @@ object N2VBaseline extends Node2Vec {
       graph.unpersist(blocking = false)
       graph.edges.unpersist(blocking = false)
       for (walkCount <- 0 until config.walkLength) {
-
         prevWalk = randomWalk
         randomWalk = randomWalk.map { case (srcNodeId, pathBuffer) =>
-          val prevNodeId = pathBuffer(pathBuffer.length - 2)
-          val currentNodeId = pathBuffer.last
+          val prevNodeId: VertexId = pathBuffer(pathBuffer.length - 2)
+          val currentNodeId: VertexId = pathBuffer.last
 
           (s"$prevNodeId$currentNodeId", (srcNodeId, pathBuffer))
         }.join(edge2attr).map { case (edge, ((srcNodeId, pathBuffer), attr)) =>
           try {
-            val nextNodeIndex = GraphOps.drawAlias(attr.J, attr.q)
-            val nextNodeId = attr.dstNeighbors(nextNodeIndex)
+            val nextNodeIndex: Int = GraphOps.drawAlias(attr.J, attr.q)
+            val nextNodeId: VertexId = attr.dstNeighbors(nextNodeIndex)
             pathBuffer.append(nextNodeId)
 
             (srcNodeId, pathBuffer)
@@ -141,10 +141,12 @@ object N2VBaseline extends Node2Vec {
   }
 
   def embedding(): this.type = {
+    logger.warn("Begin embedding")
     val randomPaths: RDD[Iterable[String]] = randomWalkPaths.map { case (vertexId, pathBuffer) =>
       Try(pathBuffer.map(_.toString).toIterable).getOrElse(null)
     }.filter(_!=null)
     Word2vec.setup(context, config).fit(randomPaths)
+    logger.warn("End embedding")
     this
   }
 

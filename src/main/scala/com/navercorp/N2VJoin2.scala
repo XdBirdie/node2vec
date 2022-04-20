@@ -103,8 +103,6 @@ object N2VJoin2 extends Node2Vec {
     edge2attr.count()
     logger.warn("- End edge2attr")
 
-    TimeRecorder("edge2attr Finishes!")
-
     for (iter <- 0 until config.numWalks) {
       logger.warn(s"# Begin walk ${iter}")
 
@@ -119,27 +117,28 @@ object N2VJoin2 extends Node2Vec {
       for (walkCount <- 0 until config.walkLength) {
         prevWalk = randomWalk.cache
 
-        val tmpWalk: RDD[((VertexId, VertexId), VertexId)] = randomWalk.map {
-          case (srcNodeId, pathBuffer) =>
-            val prevNodeId: VertexId = pathBuffer(pathBuffer.length - 2)
-            val currentNodeId: VertexId = pathBuffer.last
-            ((prevNodeId, currentNodeId), srcNodeId)
-          }.partitionBy(partitioner)
+        val tmpWalk = randomWalk.map { case (srcNodeId, pathBuffer) =>
+          val prevNodeId: VertexId = pathBuffer(pathBuffer.length - 2)
+          val currentNodeId: VertexId = pathBuffer.last
 
-        val newWalk: RDD[(VertexId, VertexId)] = edge2attr.join(tmpWalk, partitioner).map {
-          case (edge, (attr, srcNodeId)) =>
-            val nextNodeIndex: Int = GraphOps.drawAlias(attr.J, attr.q)
-            val nextNodeId: VertexId = attr.dstNeighbors(nextNodeIndex)
-            (srcNodeId, nextNodeId)
+          ((prevNodeId, currentNodeId), srcNodeId)
         }.partitionBy(partitioner)
+
+        val newWalk: RDD[(VertexId, VertexId)] =
+          edge2attr.join(tmpWalk, partitioner).map {
+            case (edge, (attr, srcNodeId)) =>
+              val nextNodeIndex: Int = GraphOps.drawAlias(attr.J, attr.q)
+              val nextNodeId: VertexId = attr.dstNeighbors(nextNodeIndex)
+              (srcNodeId, nextNodeId)
+          }.partitionBy(partitioner)
 
 
         randomWalk = randomWalk.join(newWalk).mapValues {
           case (pathBuffer, newNodeId) => pathBuffer += newNodeId
         }
         randomWalk.cache()
-
         randomWalk.count()
+
         prevWalk.unpersist(blocking=false)
       }
 

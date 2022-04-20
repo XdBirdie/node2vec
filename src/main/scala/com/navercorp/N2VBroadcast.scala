@@ -131,15 +131,14 @@ object N2VBroadcast extends Node2Vec {
             ((prevNodeId, currentNodeId), srcNodeId)
           }.partitionBy(partitioner)
 
-        val newWalk: Map[VertexId, VertexId] = edge2attr.join(tmpWalk, partitioner).map {
+        val newWalk: RDD[(VertexId, VertexId)] = edge2attr.join(tmpWalk, partitioner).map {
           case (edge, (attr, srcNodeId)) =>
             val nextNodeIndex: Int = GraphOps.drawAlias(attr.J, attr.q)
             val nextNodeId: VertexId = attr.dstNeighbors(nextNodeIndex)
             (srcNodeId, nextNodeId)
-        }.collect().toMap
+        }
 
-        newWalkBC = this.context.broadcast(newWalk)
-
+        newWalkBC = this.context.broadcast(newWalk.collect().toMap)
         randomWalk = randomWalk.map {case (nodeId, path) =>
           path += newWalkBC.value(nodeId)
           (nodeId, path)

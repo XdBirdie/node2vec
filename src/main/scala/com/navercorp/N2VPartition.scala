@@ -123,12 +123,13 @@ object N2VPartition extends Node2Vec {
           ((prevNodeId, currentNodeId), (srcNodeId, pathBuffer))
         }.partitionBy(partitioner)
 
-        randomWalk = edge2attr.join(tempWalk, partitioner).map { case (edge, (attr, (srcNodeId, pathBuffer))) =>
-          val nextNodeIndex: Int = GraphOps.drawAlias(attr.J, attr.q)
-          val nextNodeId: VertexId = attr.dstNeighbors(nextNodeIndex)
-          pathBuffer.append(nextNodeId)
+        randomWalk = edge2attr.join(tempWalk, partitioner).map {
+          case (edge, (attr, (srcNodeId, pathBuffer))) =>
+            val nextNodeIndex: Int = GraphOps.drawAlias(attr.J, attr.q)
+            val nextNodeId: VertexId = attr.dstNeighbors(nextNodeIndex)
+            pathBuffer.append(nextNodeId)
 
-          (srcNodeId, pathBuffer)
+            (srcNodeId, pathBuffer)
         }.cache()
 
         randomWalk.count()
