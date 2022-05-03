@@ -135,6 +135,9 @@ object N2VBaseline extends Node2Vec {
       } else {
         randomWalkPaths = randomWalk
       }
+      // randomWalkPaths.map{case (nodeId, pathBuffer) => 
+      //   (nodeId, s"(${pathBuffer.mkString(",")})")
+      // }.collect().foreach(println)
     }
 
     this

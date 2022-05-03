@@ -2,7 +2,7 @@ package com.navercorp
 
 
 import com.navercorp.graph.GraphOps
-import org.apache.spark.SparkContext
+import org.apache.spark.{HashPartitioner, Partitioner, SparkContext}
 import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.graphx._
 import org.apache.spark.rdd.RDD
@@ -27,26 +27,29 @@ object N2VOne extends Node2Vec {
   var bcAliasTable: Broadcast[Map[VertexId, (Array[VertexId], Array[Int], Array[Double])]] = _
 
   var NUM_PARTITIONS = 64
+  var partitioner: Partitioner = _
 
   def setup(context: SparkContext, param: Main.Params): this.type = {
     this.context = context
     this.config = param
-    NUM_PARTITIONS = param.numPartition
+    this.NUM_PARTITIONS = param.numPartition
+    this.partitioner = new HashPartitioner(this.NUM_PARTITIONS)
     this
   }
 
   def load(): this.type = {
-    val bcEdgeCreator: Broadcast[(VertexId, VertexId, Double) => Array[(VertexId, Array[(VertexId, Double)])]] =
-      if (config.directed) { context.broadcast(GraphOps.createDirectedEdge)}
-      else { context.broadcast(GraphOps.createUndirectedEdge)}
+    val bcEdgeCreator = context.broadcast(
+      if (config.directed) GraphOps.createDirectedEdge
+      else GraphOps.createUndirectedEdge
+    )
 
     val inputTriplets: RDD[(Long, Long, Double)] =
-      if (config.indexed) { readIndexedGraph(config.input)}
-      else { indexingGraph(config.input) }
+      if (config.indexed) readIndexedGraph(config.input)
+      else indexingGraph(config.input)
 
     indexedNodes = inputTriplets.flatMap { case (srcId, dstId, weight) =>
       bcEdgeCreator.value.apply(srcId, dstId, weight)
-    }.reduceByKey(_++_).cache()
+    }.reduceByKey(_++_).partitionBy(partitioner).cache()
 
     indexedNodes.count()
     this
@@ -61,8 +64,7 @@ object N2VOne extends Node2Vec {
           (vertexId, (neighbors.map((_: (VertexId, Double))._1), j, q))
       }
     }
-
-    val aliasTable: Map[VertexId, (Array[VertexId], Array[Int], Array[Double])] = aliasRDD.collect().toMap
+    val aliasTable: Map[VertexId, (Array[VertexId], Array[PartitionID], Array[Double])] = aliasRDD.collect().toMap
     bcAliasTable = this.context.broadcast(aliasTable)
     this
   }
@@ -77,14 +79,15 @@ object N2VOne extends Node2Vec {
           val pathBuffer = new ArrayBuffer[VertexId]()
           pathBuffer.append(nodeId)
           (nodeId, pathBuffer)
-        }.cache
+        }.cache()
 
       randomWalk.count()
 
       for (walkCount <- 0 until config.walkLength) {
         prevWalk = randomWalk
 
-        randomWalk = randomWalk.mapValues { pathBuffer: ArrayBuffer[VertexId] => {
+        randomWalk = randomWalk.mapPartitions(
+          (_: Iterator[(VertexId, ArrayBuffer[VertexId])]).map { case (srcId, pathBuffer) =>
             val currentNodeId: VertexId = pathBuffer.last
 
             val (neighbours, j, q) = bcAliasTable.value(currentNodeId)
@@ -92,9 +95,8 @@ object N2VOne extends Node2Vec {
             val nextNodeId: VertexId = neighbours(nextNodeIndex)
             pathBuffer.append(nextNodeId)
 
-            pathBuffer
-          }
-        }.cache()
+            (srcId, pathBuffer)
+        }).cache()
 
         randomWalk.count()
         prevWalk.unpersist(blocking=false)
@@ -125,8 +127,9 @@ object N2VOne extends Node2Vec {
   def embedding(): this.type = {
     logger.warn("Begin embedding")
 
-    val randomPaths = randomWalkPaths.map { case (vertexId, pathBuffer) =>
-      Try(pathBuffer.map(_.toString).toIterable).getOrElse(null)
+    val randomPaths: RDD[Iterable[String]] = randomWalkPaths.map {
+      case (vertexId, pathBuffer) =>
+        Try(pathBuffer.map(_.toString).toIterable).getOrElse(null)
     }.filter(_!=null)
 
     Word2vec.setup(context, config).fit(randomPaths)
@@ -155,7 +158,6 @@ object N2VOne extends Node2Vec {
 
   def saveModel(): this.type = {
     Word2vec.save(config.output)
-
     this
   }
 
@@ -192,75 +194,78 @@ object N2VOne extends Node2Vec {
 
   def loadNode2Id(node2idPath: String): this.type = {
     try {
-      this.node2id = context.textFile(config.nodePath).map { node2index =>
-        val Array(strNode, index) = node2index.split("\\s")
-        (strNode, index.toLong)
+      this.node2id = context.textFile(config.nodePath, NUM_PARTITIONS).map {
+        node2index: String =>
+          val Array(strNode, index) = node2index.split("\\s")
+          (strNode, index.toLong)
       }
     } catch {
-      case e: Exception => logger.info("Failed to read node2index file.")
-        this.node2id = null
+      case _: Exception => logger.info("Failed to read node2index file.")
+      this.node2id = null
     }
-
     this
   }
 
-  def readIndexedGraph(tripletPath: String) = {
+  def readIndexedGraph(tripletPath: String): RDD[(VertexId, VertexId, Double)] = {
     val bcWeighted: Broadcast[Boolean] = context.broadcast(config.weighted)
 
-    val rawTriplets: RDD[String] = context.textFile(tripletPath)
+    val rawTriplets: RDD[String] = context.textFile(tripletPath, NUM_PARTITIONS)
+
     if (config.nodePath == null) {
-      this.node2id = createNode2Id(rawTriplets.map { triplet =>
-        val parts = triplet.split("\\s")
-        (parts.head, parts(1), -1)
+      this.node2id = createNode2Id(rawTriplets.map { triplet: String =>
+        val parts: Array[String] = triplet.split("\\s")
+        (parts.head, parts(1), 1)
       })
     } else {
       loadNode2Id(config.nodePath)
     }
 
-    rawTriplets.map { triplet =>
-      val parts = triplet.split("\\s")
-      val weight = bcWeighted.value match {
-        case true => Try(parts.last.toDouble).getOrElse(1.0)
-        case false => 1.0
-      }
+    rawTriplets.map { triplet: String =>
+      val parts: Array[String] = triplet.split("\\s")
+      val weight: Double =
+        if (bcWeighted.value) Try(parts.last.toDouble).getOrElse(1.0) else 1.0
 
       (parts.head.toLong, parts(1).toLong, weight)
     }
   }
 
 
-  def indexingGraph(rawTripletPath: String): RDD[(Long, Long, Double)] = {
-    val rawEdges = context.textFile(rawTripletPath).map { triplet =>
-      val parts = triplet.split("\\s")
+  def indexingGraph(rawTripletPath: String): RDD[(VertexId, VertexId, Double)] = {
+    // read raw graph
+    val rawEdges: RDD[(String, String, Double)] =
+      context.textFile(rawTripletPath, NUM_PARTITIONS).map { triplet: String =>
+        val parts: Array[String] = triplet.split("\\s")
+        Try(parts.head, parts(1), Try(parts.last.toDouble).getOrElse(1.0)).getOrElse(null)
+      }.filter((_: (String, String, Double))!=null).repartition(NUM_PARTITIONS)
 
-      Try {
-        (parts.head, parts(1), Try(parts.last.toDouble).getOrElse(1.0))
-      }.getOrElse(null)
-    }.filter(_!=null)
+    // get map of node2id
+    val partitioner = new HashPartitioner(NUM_PARTITIONS)
+    this.node2id = createNode2Id(rawEdges).partitionBy(partitioner)
 
-    this.node2id = createNode2Id(rawEdges)
+    val srcRDD: RDD[(String, (String, Double))] =
+      rawEdges.map { case (src, dst, weight) =>
+        (src, (dst, weight))
+      }.partitionBy(partitioner)
 
-    rawEdges.map { case (src, dst, weight) =>
-      (src, (dst, weight))
-    }.join(node2id).map { case (src, (edge: (String, Double), srcIndex: Long)) =>
-      try {
-        val (dst: String, weight: Double) = edge
-        (dst, (srcIndex, weight))
-      } catch {
-        case e: Exception => null
+    // map src node to srcId to get the dstRDD
+    val dstRDD: RDD[(String, (VertexId, Double))] =
+      this.node2id.join(srcRDD, partitioner).mapPartitions{
+        (_: Iterator[(String, (VertexId, (String, Double)))]).map{
+          case (src, (srcId, (dst, weight))) => Try(dst, (srcId, weight)).getOrElse(null)
+        }.filter((_: (String, (VertexId, Double))) != null)
       }
-    }.filter(_!=null).join(node2id).map { case (dst, (edge: (Long, Double), dstIndex: Long)) =>
-      try {
-        val (srcIndex, weight) = edge
-        (srcIndex, dstIndex, weight)
-      } catch {
-        case e: Exception => null
-      }
-    }.filter(_!=null)
+
+    // map dst node to dstId to get the result
+    this.node2id.join(dstRDD, partitioner).mapPartitions{
+      (_: Iterator[(String, (VertexId, (VertexId, Double)))]).map{
+        case (dst, (dstId, (srcId, weight))) => Try(srcId, dstId , weight).getOrElse(null)
+      }.filter((_: (VertexId, VertexId, Double)) != null)
+    }
   }
 
-  def createNode2Id[T <: Any](triplets: RDD[(String, String, T)]): RDD[(String, VertexId)] = triplets.flatMap { case (src, dst, weight) =>
-    Try(Array(src, dst)).getOrElse(Array.empty[String])
-  }.distinct().zipWithIndex()
+  def createNode2Id[T](triplets: RDD[(String, String, T)]): RDD[(String, VertexId)] =
+    triplets.flatMap { case (src, dst, _) =>
+      Try(Array(src, dst)).getOrElse(Array.empty[String])
+    }.distinct().zipWithIndex()
 
 }
