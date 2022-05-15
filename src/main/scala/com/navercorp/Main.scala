@@ -40,6 +40,9 @@ object Main {
   
   val parser: OptionParser[Params] = new OptionParser[Params]("Node2Vec_Spark") {
     head("Node2vec Spark")
+    opt[Int]("iter")
+      .text(s"iter: ${defaultParams.iter}")
+      .action((x, c) => c.copy(iter = x))
     opt[Int]("walkLength")
             .text(s"walkLength: ${defaultParams.walkLength}")
             .action((x, c) => c.copy(walkLength = x))
@@ -132,7 +135,7 @@ object Main {
         case Command.randomwalk => N2V.load()
                                            .initTransitionProb()
                                            .randomWalk()
-//                                           .saveRandomPath()
+                                           .saveRandomPath()
         case Command.embedding => {
           val randomPaths = Word2vec.setup(context, param).read(param.input)
           Word2vec.fit(randomPaths).save(param.output)
