@@ -1,10 +1,13 @@
 package com.navercorp
 
+import com.navercorp.N2V.{N2VBaseline, N2VBroadcast, N2VJoin2, N2VOne, N2VPartition, Node2Vec}
+
 import java.io.Serializable
 import org.apache.spark.{SparkConf, SparkContext}
 import scopt.OptionParser
 import com.navercorp.lib.AbstractParams
 import com.navercorp.util.TimeRecorder
+import org.apache.spark.rdd.RDD
 
 object Main {
   object Command extends Enumeration {
@@ -20,9 +23,10 @@ object Main {
 
   case class Params(iter: Int = 10,
                     lr: Double = 0.025,
-                    numPartition: Int = 10,
+                    numPartitions: Int = 10,
                     dim: Int = 128,
                     window: Int = 10,
+                    minCount: Int = 0,
                     walkLength: Int = 80,
                     numWalks: Int = 10,
                     p: Double = 1.0,
@@ -37,57 +41,60 @@ object Main {
                     cmd: Command = Command.node2vec,
                     version: Version = Version.partition) extends AbstractParams[Params] with Serializable
   val defaultParams: Params = Params()
-  
+
   val parser: OptionParser[Params] = new OptionParser[Params]("Node2Vec_Spark") {
     head("Node2vec Spark")
     opt[Int]("iter")
       .text(s"iter: ${defaultParams.iter}")
-      .action((x, c) => c.copy(iter = x))
+      .action((x: Int, c: Params) => c.copy(iter = x))
     opt[Int]("walkLength")
-            .text(s"walkLength: ${defaultParams.walkLength}")
-            .action((x, c) => c.copy(walkLength = x))
+      .text(s"walkLength: ${defaultParams.walkLength}")
+      .action((x: Int, c: Params) => c.copy(walkLength = x))
     opt[Int]("numWalks")
-            .text(s"numWalks: ${defaultParams.numWalks}")
-            .action((x, c) => c.copy(numWalks = x))
+      .text(s"numWalks: ${defaultParams.numWalks}")
+      .action((x: Int, c: Params) => c.copy(numWalks = x))
     opt[Double]("p")
-            .text(s"return parameter p: ${defaultParams.p}")
-            .action((x, c) => c.copy(p = x))
+      .text(s"return parameter p: ${defaultParams.p}")
+      .action((x: Double, c: Params) => c.copy(p = x))
     opt[Double]("q")
-            .text(s"in-out parameter q: ${defaultParams.q}")
-            .action((x, c) => c.copy(q = x))
+      .text(s"in-out parameter q: ${defaultParams.q}")
+      .action((x: Double, c: Params) => c.copy(q = x))
+    opt[Int]("minCount")
+      .text(s"minCount: ${defaultParams.minCount}")
+      .action((x: Int, c: Params) => c.copy(minCount = x))
     opt[Boolean]("weighted")
-            .text(s"weighted: ${defaultParams.weighted}")
-            .action((x, c) => c.copy(weighted = x))
+      .text(s"weighted: ${defaultParams.weighted}")
+      .action((x: Boolean, c: Params) => c.copy(weighted = x))
     opt[Boolean]("directed")
-            .text(s"directed: ${defaultParams.directed}")
-            .action((x, c) => c.copy(directed = x))
+      .text(s"directed: ${defaultParams.directed}")
+      .action((x: Boolean, c: Params) => c.copy(directed = x))
     opt[Int]("degree")
-            .text(s"degree: ${defaultParams.degree}")
-            .action((x, c) => c.copy(degree = x))
+      .text(s"degree: ${defaultParams.degree}")
+      .action((x: Int, c: Params) => c.copy(degree = x))
     opt[Boolean]("indexed")
-            .text(s"Whether nodes are indexed or not: ${defaultParams.indexed}")
-            .action((x, c) => c.copy(indexed = x))
+      .text(s"Whether nodes are indexed or not: ${defaultParams.indexed}")
+      .action((x: Boolean, c: Params) => c.copy(indexed = x))
     opt[String]("nodePath")
-            .text("Input node2index file path: empty")
-            .action((x, c) => c.copy(nodePath = x))
+      .text("Input node2index file path: empty")
+      .action((x: String, c: Params) => c.copy(nodePath = x))
     opt[String]("input")
-            .required()
-            .text("Input edge file path: empty")
-            .action((x, c) => c.copy(input = x))
+      .required()
+      .text("Input edge file path: empty")
+      .action((x: String, c: Params) => c.copy(input = x))
     opt[String]("output")
-            .required()
-            .text("Output path: empty")
-            .action((x, c) => c.copy(output = x))
+      .required()
+      .text("Output path: empty")
+      .action((x: String, c: Params) => c.copy(output = x))
     opt[String]("cmd")
-            .required()
-            .text(s"command: ${defaultParams.cmd.toString}")
-            .action((x, c) => c.copy(cmd = Command.withName(x)))
+      .required()
+      .text(s"command: ${defaultParams.cmd.toString}")
+      .action((x: String, c: Params) => c.copy(cmd = Command.withName(x)))
     opt[String]("version")
-            .text(s"version: ${defaultParams.version.toString}")
-            .action((x, c) => c.copy(version = Version.withName(x)))
+      .text(s"version: ${defaultParams.version.toString}")
+      .action((x: String, c: Params) => c.copy(version = Version.withName(x)))
     opt[Int]("partitions")
-            .text(s"partitions: ${defaultParams.numPartition}")
-            .action((x, c) => c.copy(numPartition=x))
+      .text(s"partitions: ${defaultParams.numPartitions}")
+      .action((x: Int, c: Params) => c.copy(numPartitions=x))
 
     note(
       """
@@ -97,7 +104,7 @@ object Main {
       """.stripMargin +
               s"|   --lr ${defaultParams.lr}" +
               s"|   --iter ${defaultParams.iter}" +
-              s"|   --numPartition ${defaultParams.numPartition}" +
+              s"|   --numPartition ${defaultParams.numPartitions}" +
               s"|   --dim ${defaultParams.dim}" +
               s"|   --window ${defaultParams.window}" +
               s"|   --input <path>" +
@@ -109,44 +116,33 @@ object Main {
   def main(args: Array[String]):Unit = {
     TimeRecorder.init()
 
-    parser.parse(args, defaultParams).map { param: Params =>
-      val conf: SparkConf = new SparkConf().setAppName("com.navercorp.Node2Vec")
-      val context: SparkContext = new SparkContext(conf)
-      // 设置log级别
-      context.setLogLevel("WARN")
+    val option: Option[Params] = parser.parse(args, defaultParams)
+    val param: Params = option.get
 
-      val N2V: Node2Vec = param.version match {
-        case Version.baseline => N2VBaseline
-        case Version.partition => N2VPartition
-        case Version.broadcast => N2VBroadcast
-        case Version.join2 => N2VJoin2
-        case Version.one => N2VOne
-      }
+    val conf: SparkConf = new SparkConf().setAppName("com.navercorp.N2V.Node2Vec")
+    val context: SparkContext = new SparkContext(conf)
+    context.setLogLevel("WARN")
 
-      N2V.setup(context, param)
-      println(param)
-
-      param.cmd match {
-        case Command.node2vec => N2V.load()
-                                         .initTransitionProb()
-                                         .randomWalk()
-                                         .embedding()
-//                                         .save()
-        case Command.randomwalk => N2V.load()
-                                           .initTransitionProb()
-                                           .randomWalk()
-                                           .saveRandomPath()
-        case Command.embedding => {
-          val randomPaths = Word2vec.setup(context, param).read(param.input)
-          Word2vec.fit(randomPaths).save(param.output)
-          N2V.loadNode2Id(param.nodePath).saveVectors()
-        }
-      }
-    } getOrElse {
-      sys.exit(1)
+    val N2V: Node2Vec = param.version match {
+      case Version.baseline => N2VBaseline
+      case Version.partition => N2VPartition
+      case Version.broadcast => N2VBroadcast
+      case Version.join2 => N2VJoin2
+      case Version.one => N2VOne
     }
 
-//     TimeRecorder.show()
-//     TimeRecorder.save("~/Projects/node2vec-spark/log/test.log")
+    N2V.setup(context, param)
+    println(param)
+
+    param.cmd match {
+      case Command.node2vec =>
+        N2V.load().initTransitionProb().randomWalk().embedding().save()
+      case Command.randomwalk =>
+        N2V.load().initTransitionProb().randomWalk().saveRandomPath()
+      case Command.embedding =>
+        val randomPaths: RDD[Iterable[String]] = word2vec.setup(context, param).read(param.input)
+        word2vec.fit(randomPaths).save(param.output)
+        N2V.loadNode2Id(param.nodePath).saveVectors()
+    }
   }
 }

@@ -23,7 +23,7 @@
 
 # dataset=cit-Patents
 cmd=node2vec
-for dataset in BlogCatalog # cit-Patents # BlogCatalog
+for dataset in cit-Patents # BlogCatalog # cit-Patents # BlogCatalog
 do
   for version in one # join2 partition one broadcast baseline
   do
@@ -40,7 +40,7 @@ do
         --cmd $cmd --version $version --directed false --indexed false --weighted false \
         --walkLength 20  --numWalks 5 --degree 100 \
         --partitions 64  --iter 1 \
-        --input graph/$dataset --output randompath/$dataset-rp > $log_path
+        --input graph/$dataset --output emb/$dataset-result > $log_path
   done
 done
 
