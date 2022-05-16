@@ -1,5 +1,6 @@
 package com.navercorp.N2V
 
+import com.navercorp.util.TimeRecorder
 import com.navercorp.{Main, word2vec}
 import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.{HashPartitioner, SparkContext}
@@ -34,12 +35,18 @@ trait Node2Vec extends Serializable {
 
   def randomWalk(): this.type
 
+  def cleanup(): this.type
+
   def embedding(): this.type = {
+    TimeRecorder(s"embedding begin")
     val randomPaths: RDD[Iterable[String]] = randomWalkPaths.map {
       case (_, pathBuffer) =>
         Try(pathBuffer.map((_: VertexId).toString).toIterable).getOrElse(null)
-    }.filter((_: Iterable[String]) != null)
+    }.filter((_: Iterable[String]) != null).cache()
+    randomPaths.count()
+    randomWalkPaths.unpersist(blocking = false)
     word2vec.setup(context, config).fit(randomPaths)
+    TimeRecorder(s"embedding end")
     this
   }
 
@@ -125,7 +132,6 @@ trait Node2Vec extends Serializable {
       (parts.head.toLong, parts(1).toLong, weight)
     }
   }
-
 
   def indexingGraph(rawTripletPath: String): RDD[(VertexId, VertexId, Double)] = {
     // read raw graph

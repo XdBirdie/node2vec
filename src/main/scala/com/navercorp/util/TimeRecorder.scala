@@ -5,21 +5,23 @@ import scala.collection.mutable.ArrayBuffer
 
 case object TimeRecorder {
   case class Record(time: Long, msg: String, caller: String) {
-    override def toString: String = s"${time}\t ${caller}\t - ${msg}"
-
+    override def toString: String = s"$time\t $caller\t - $msg"
   }
 
   val startTime: Long = System.currentTimeMillis()
   val timeRecords = new ArrayBuffer[Record]
 
-  def init(): Long = startTime
+  def setup(): Unit = {
+    println(startTime)
+  }
 
   def apply(msg: String): Record = {
     val delta: Long = System.currentTimeMillis() - startTime
-    val caller: String = getTrace(3)
+    val caller: String = getTrace()
 
     val record: Record = Record(delta, msg, caller)
     timeRecords += record
+    println(record)
     record
   }
 
@@ -33,7 +35,7 @@ case object TimeRecorder {
     writer.close()
   }
 
-  private def getTrace(level: Int):String = {
+  private def getTrace(level: Int=3):String = {
     val t: StackTraceElement = Thread.currentThread.getStackTrace()(level)
     s"${t.getFileName}:${t.getLineNumber}"
   }

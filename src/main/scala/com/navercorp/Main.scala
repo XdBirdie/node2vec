@@ -38,6 +38,7 @@ object Main {
                     nodePath: String = null,
                     input: String = null,
                     output: String = null,
+                    logPath: String = "./time-record.log",
                     cmd: Command = Command.node2vec,
                     version: Version = Version.partition) extends AbstractParams[Params] with Serializable
   val defaultParams: Params = Params()
@@ -77,6 +78,9 @@ object Main {
     opt[String]("nodePath")
       .text("Input node2index file path: empty")
       .action((x: String, c: Params) => c.copy(nodePath = x))
+    opt[String]("logPath")
+      .text(s"Log path: ${defaultParams.logPath}")
+      .action((x: String, c: Params) => c.copy(logPath = x))
     opt[String]("input")
       .required()
       .text("Input edge file path: empty")
@@ -114,7 +118,7 @@ object Main {
   }
   
   def main(args: Array[String]):Unit = {
-    TimeRecorder.init()
+    TimeRecorder.setup()
 
     val option: Option[Params] = parser.parse(args, defaultParams)
     val param: Params = option.get
@@ -144,5 +148,8 @@ object Main {
         word2vec.fit(randomPaths).save(param.output)
         N2V.loadNode2Id(param.nodePath).saveVectors()
     }
+
+    TimeRecorder.show()
+    TimeRecorder.save(param.logPath)
   }
 }

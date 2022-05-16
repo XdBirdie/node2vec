@@ -20,7 +20,7 @@ object word2vec extends Serializable {
       .setVectorSize(param.dim)
       .setWindowSize(param.window)
       .setMinCount(param.minCount)
-
+    org.apache.spark.mllib.feature.Word2VecModel
     this
   }
 

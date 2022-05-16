@@ -1,11 +1,14 @@
 package com.navercorp.N2V
 
 import com.navercorp.Main
+import com.navercorp.N2V.N2VOne.bcAliasTable
 import com.navercorp.graph.GraphOps
+import com.navercorp.util.TimeRecorder
 import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.graphx.{PartitionID, VertexId}
 import org.apache.spark.rdd.RDD
 import org.apache.spark.{HashPartitioner, Partitioner, SparkContext}
+import util.control.Breaks._
 
 import scala.collection.mutable.ArrayBuffer
 
@@ -42,8 +45,8 @@ object N2VOne extends Node2Vec {
     this
   }
 
-
   def initTransitionProb(): this.type = {
+    TimeRecorder("init begin")
     val aliasRDD: RDD[(VertexId, (Array[VertexId], Array[Int], Array[Double]))] = {
       indexedNodes.map {
         case (vertexId: VertexId, neighbors: Array[(VertexId, Double)]) =>
@@ -53,12 +56,17 @@ object N2VOne extends Node2Vec {
     }
     val aliasTable: Map[VertexId, (Array[VertexId], Array[PartitionID], Array[Double])] = aliasRDD.collect().toMap
     bcAliasTable = this.context.broadcast(aliasTable)
+    TimeRecorder("init end")
     this
   }
 
   def randomWalk(bcAliasTable: Broadcast[Map[VertexId, (Array[VertexId], Array[Int], Array[Double])]]): this.type = {
+    TimeRecorder("random walk begin")
+    val bcWalkLength: Broadcast[Int] = context.broadcast(config.walkLength)
+
     for (iter <- 0 until config.numWalks) {
       logger.warn(s"Begin random walk: $iter")
+      TimeRecorder(s"random walk $iter begin")
 
       var prevWalk: RDD[(Long, ArrayBuffer[Long])] = null
       var randomWalk: RDD[(VertexId, ArrayBuffer[VertexId])] =
@@ -68,27 +76,24 @@ object N2VOne extends Node2Vec {
           (nodeId, pathBuffer)
         }.cache()
 
+      randomWalk = randomWalk.mapPartitions{
+        (_: Iterator[(VertexId, ArrayBuffer[VertexId])]).map{ case (srcId, pathBuffer) =>
+          var last: VertexId = pathBuffer.last
+          var walkCount: Int = 0
+          while (walkCount < bcWalkLength.value) {
+            bcAliasTable.value.get(last) match {
+              case Some((neighbours, j, q)) =>
+                val nextNodeIndex: Int = GraphOps.drawAlias(j, q)
+                last = neighbours(nextNodeIndex)
+                pathBuffer.append(last)
+                walkCount += 1
+              case None => walkCount = bcWalkLength.value
+            }
+          }
+          (srcId, pathBuffer)
+        }
+      }.cache()
       randomWalk.count()
-
-      for (walkCount <- 0 until config.walkLength) {
-        prevWalk = randomWalk
-
-        randomWalk = randomWalk.mapPartitions(
-          (_: Iterator[(VertexId, ArrayBuffer[VertexId])]).map { case (srcId, pathBuffer) =>
-            val currentNodeId: VertexId = pathBuffer.last
-
-            val (neighbours, j, q) = bcAliasTable.value(currentNodeId)
-            val nextNodeIndex: Int = GraphOps.drawAlias(j, q)
-            val nextNodeId: VertexId = neighbours(nextNodeIndex)
-            pathBuffer.append(nextNodeId)
-
-            (srcId, pathBuffer)
-          }).cache()
-
-        randomWalk.count()
-        prevWalk.unpersist(blocking = false)
-      }
-
 
       if (randomWalkPaths != null) {
         val prevRandomWalkPaths: RDD[(VertexId, ArrayBuffer[VertexId])] = randomWalkPaths
@@ -100,6 +105,7 @@ object N2VOne extends Node2Vec {
       }
 
       logger.warn(s"End random walk: $iter")
+      TimeRecorder(s"random walk $iter end")
     }
     this
   }
@@ -107,12 +113,14 @@ object N2VOne extends Node2Vec {
   def randomWalk(): this.type = {
     logger.warn("N2VOne Begin random walk")
     randomWalk(this.bcAliasTable)
+    bcAliasTable.unpersist(blocking = false)
     logger.warn("N2VOne End random walk")
     this
   }
 
   def cleanup(): this.type = {
     node2id.unpersist(blocking = false)
+    bcAliasTable.unpersist(blocking = false)
     indexedNodes.unpersist(blocking = false)
     randomWalkPaths.unpersist(blocking = false)
     this

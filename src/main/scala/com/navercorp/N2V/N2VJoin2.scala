@@ -56,7 +56,6 @@ object N2VJoin2 extends Node2Vec {
     this
   }
 
-
   def initTransitionProb(): this.type = {
     logger.warn("# Begin initTransitionProb")
     val bcP: Broadcast[Double] = context.broadcast(config.p)
@@ -145,7 +144,6 @@ object N2VJoin2 extends Node2Vec {
     logger.warn("End random walk")
     this
   }
-
 
   def cleanup(): this.type = {
     node2id.unpersist(blocking = false)
