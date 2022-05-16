@@ -1,83 +1,31 @@
-# nohup shell/test.sh > log/disk.log &
-
-# Dataset=graph/BlogCatalog
-
-# dataset=cit-Patents
-# cmd=node2vec
-# for version in one # join2 partition one broadcast baseline
+# hdfs dfs -rm -r emb/*
+# cmd=randomwalk
+# for dataset in cit-Patents  # BlogCatalog # cit-Patents # soc-LiveJournal1 # BlogCatalog # cit-Patents # BlogCatalog
 # do
-#   log_path=log/$dataset-$version-2.log
-#   echo $log_path
+#   for version in baseline # one # join2 partition one broadcast baseline
+#   do
+#     log_path=log/$dataset-$version-3.log
+#     echo $log_path
 
-#   spark-submit --class com.navercorp.Main \
-#        --master yarn --deploy-mode client \
-#        --num-executors 4 --executor-cores 96\
-#        --driver-memory 50G --executor-memory 50G \
-#        --conf spark.driver.maxResultSize=10G \
-#        ./node2vec-0.1.2-SNAPSHOT.jar \
-#        --cmd $cmd --version $version --directed false --indexed false --weighted false \
-#        --walkLength 20  --numWalks 5 --degree 100 \
-#        --partitions 800 \
-#        --input graph/$dataset --output emb/Blog.emb > $log_path
+#     spark-submit --class com.navercorp.Main \
+#         --master spark://sepc724.se.cuhk.edu.hk:7077 \
+#         --driver-memory 50G --executor-memory 50G --executor-cores 4\
+#         --conf spark.driver.maxResultSize=10G\
+#         ./target/node2vec-0.1.2-SNAPSHOT.jar \
+#         --cmd $cmd --version $version --directed false --indexed false --weighted false \
+#         --walkLength 20  --numWalks 5 --degree 100 \
+#         --partitions 64  --iter 10 \
+#         --input graph/$dataset --output emb/$dataset-$version \
+#         --logPath ./log.out > $log_path
+#   done
 # done
-
-# dataset=cit-Patents
-hdfs dfs -rm -r emb/*
-cmd=randomwalk
-for dataset in cit-Patents  # BlogCatalog # cit-Patents # soc-LiveJournal1 # BlogCatalog # cit-Patents # BlogCatalog
-do
-  for version in baseline # one # join2 partition one broadcast baseline
-  do
-    log_path=log/$dataset-$version-3.log
-    echo $log_path
-
-    spark-submit --class com.navercorp.Main \
-        --master spark://sepc724.se.cuhk.edu.hk:7077 \
-        --driver-memory 50G --executor-memory 50G --executor-cores 4\
-        --conf spark.driver.maxResultSize=10G\
-        ./target/node2vec-0.1.2-SNAPSHOT.jar \
-        --cmd $cmd --version $version --directed false --indexed false --weighted false \
-        --walkLength 20  --numWalks 5 --degree 100 \
-        --partitions 64  --iter 10 \
-        --input graph/$dataset --output emb/$dataset-$version \
-        --logPath ./log.out > $log_path
-  done
-done
-
-# TestDataset=graph/karate.edgelist
-
-# spark-submit --class com.navercorp.Main \
-#        --master spark://sepc724.se.cuhk.edu.hk:7077\
-#        ./target/node2vec-0.1.2-SNAPSHOT.jar\
-#        --cmd $cmd --version baseline --directed false --indexed false --weighted false\
-#        --walkLength 20  --numWalks 5 --degree 100\
-#        --input $Dataset --output emb/Blog.emb > log/blog_baseline1.log
-
-# spark-submit --class com.navercorp.Main \
-#        --master spark://sepc724.se.cuhk.edu.hk:7077\
-#        ./target/node2vec-0.1.2-SNAPSHOT.jar\
-#        --cmd $cmd --version broadcast --directed false --indexed false --weighted false\
-#        --walkLength 20  --numWalks 5 --degree 100\
-#        --input $Dataset --output emb/Blog.emb > log/blog_broadcast1.log
-
-# spark-submit --class com.navercorp.Main \
-#        --master spark://sepc724.se.cuhk.edu.hk:7077\
-#        ./target/node2vec-0.1.2-SNAPSHOT.jar\
-#        --cmd $cmd --version join2 --directed false --indexed false --weighted false\
-#        --walkLength 20  --numWalks 5 --degree 100\
-#        --input $Dataset --output emb/Blog.emb > log/blog_join2-1.log
-
-# spark-submit --class com.navercorp.Main \
-#        --master spark://sepc724.se.cuhk.edu.hk:7077\
-#        ./target/node2vec-0.1.2-SNAPSHOT.jar\
-#        --cmd $cmd --version partition --directed false --indexed false --weighted false\
-#        --walkLength 20  --numWalks 5 --degree 100\
-#        --input $Dataset --output emb/Blog.emb > log/blog_partition1.log
-
-# spark-submit --class com.navercorp.Main \
-#        --master spark://sepc724.se.cuhk.edu.hk:7077\
-#        --driver-memory 20G \
-#        ./target/node2vec-0.1.2-SNAPSHOT.jar\
-#        --cmd $cmd --version one --directed false --indexed false --weighted false\
-#        --walkLength 20  --numWalks 5 --degree 100\
-#        --input $Dataset --output emb/Blog.emb > log/cit_one-1.log
+cmd=node2vec
+spark-submit --class com.navercorp.Main \
+    --master spark://sepc724.se.cuhk.edu.hk:7077 \
+    --driver-memory 50G --executor-memory 50G --executor-cores 4\
+    --conf spark.driver.maxResultSize=10G\
+    ./target/node2vec-0.1.2-SNAPSHOT.jar \
+    --cmd $cmd --version one --directed true --indexed false --weighted false \
+    --walkLength 20 --numWalks 5 --partitions 64 --iter 10 --window 20 \
+    --logPath cit-Patents-One-timeline.log \
+    --input graph/cit-Patents --output emb/cit-Patents-One.emb > cit-Patents-One.log
