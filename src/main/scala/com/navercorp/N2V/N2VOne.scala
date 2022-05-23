@@ -1,14 +1,12 @@
 package com.navercorp.N2V
 
 import com.navercorp.Main
-import com.navercorp.N2V.N2VOne.bcAliasTable
 import com.navercorp.graph.GraphOps
 import com.navercorp.util.TimeRecorder
 import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.graphx.{PartitionID, VertexId}
 import org.apache.spark.rdd.RDD
 import org.apache.spark.{HashPartitioner, Partitioner, SparkContext}
-import util.control.Breaks._
 
 import scala.collection.mutable.ArrayBuffer
 
@@ -54,7 +52,7 @@ object N2VOne extends Node2Vec {
           (vertexId, (neighbors.map((_: (VertexId, Double))._1), j, q))
       }
     }
-    val aliasTable: Map[VertexId, (Array[VertexId], Array[PartitionID], Array[Double])] = aliasRDD.collect().toMap
+    val aliasTable: Map[VertexId, (Array[VertexId], Array[Int], Array[Double])] = aliasRDD.collect().toMap
     bcAliasTable = this.context.broadcast(aliasTable)
     TimeRecorder("init end")
     this
@@ -68,7 +66,6 @@ object N2VOne extends Node2Vec {
       logger.warn(s"Begin random walk: $iter")
       TimeRecorder(s"random walk $iter begin")
 
-      var prevWalk: RDD[(Long, ArrayBuffer[Long])] = null
       var randomWalk: RDD[(VertexId, ArrayBuffer[VertexId])] =
         indexedNodes.map { case (nodeId: VertexId, _) =>
           val pathBuffer = new ArrayBuffer[VertexId]()

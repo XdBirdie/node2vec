@@ -166,7 +166,7 @@ object Main {
       case Command.embedding =>
         val randomPaths: RDD[Iterable[String]] = word2vec.setup(context, param).read(param.input)
         word2vec.fit(randomPaths).save(param.output)
-        N2V.loadNode2Id(param.nodePath).saveVectors()
+        N2V.loadNode2Id().saveVectors()
     }
 
     TimeRecorder.show()
