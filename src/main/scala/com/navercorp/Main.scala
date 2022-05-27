@@ -7,12 +7,13 @@ import org.apache.spark.{SparkConf, SparkContext}
 import scopt.OptionParser
 import com.navercorp.lib.AbstractParams
 import com.navercorp.util.TimeRecorder
+import org.apache.spark.mllib.evaluation.BinaryClassificationMetrics
 import org.apache.spark.rdd.RDD
 
 object Main {
   object Command extends Enumeration {
     type Command = Value
-    val node2vec, randomwalk, embedding = Value
+    val node2vec, randomwalk, embedding, linkPredict = Value
   }
   object Version extends Enumeration {
     type Version = Value
@@ -68,6 +69,10 @@ object Main {
     opt[Int]("minCount")
       .text(s"minCount: ${defaultParams.minCount}")
       .action((x: Int, c: Params) => c.copy(minCount = x))
+
+    opt[Int]("dim")
+      .text(s"dim: ${defaultParams.dim}")
+      .action((x: Int, c: Params) => c.copy(dim = x))
 
     opt[Boolean]("weighted")
       .text(s"weighted: ${defaultParams.weighted}")
@@ -167,6 +172,8 @@ object Main {
         val randomPaths: RDD[Iterable[String]] = word2vec.setup(context, param).read(param.input)
         word2vec.fit(randomPaths).save(param.output)
         N2V.loadNode2Id().saveVectors()
+      case Command.linkPredict =>
+        LinkPredict.setup(context, param).run()
     }
 
     TimeRecorder.show()

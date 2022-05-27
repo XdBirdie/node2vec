@@ -58,7 +58,7 @@ trait Node2Vec extends Serializable {
 
   def saveRandomPath(): this.type = {
     randomWalkPaths
-      .map{case (_, pathBuffer) => Try(pathBuffer.mkString("\t")).getOrElse(null)}
+      .map{case (_, pathBuffer) => Try(pathBuffer.mkString(" ")).getOrElse(null)}
       .filter((x: String) => x != null && x.replaceAll("\\s", "").nonEmpty)
       .repartition(config.numPartitions)
       .saveAsTextFile(config.output)
@@ -75,7 +75,7 @@ trait Node2Vec extends Serializable {
 
     val node2vector: RDD[(VertexId, String)] =
       context.makeRDD(word2vec.getVectors.toList, config.numPartitions).map{
-        case (nodeId, vector) => (nodeId.toLong, vector.mkString(", "))
+        case (nodeId, vector) => (nodeId.toLong, vector.mkString(" "))
       }.partitionBy(partitioner)
 
     if (this.node2id != null) {
@@ -84,11 +84,11 @@ trait Node2Vec extends Serializable {
       }.partitionBy(partitioner)
 
       node2vector.join(id2Node, partitioner)
-        .map { case (_, (vector, name)) => s"$name\t $vector" }
+        .map { case (_, (vector, name)) => s"$name $vector" }
         .repartition(config.numPartitions)
         .saveAsTextFile(s"${config.output}.emb")
     } else {
-      node2vector.map { case (nodeId, vector) => s"$nodeId\t $vector" }
+      node2vector.map { case (nodeId, vector) => s"$nodeId $vector" }
         .repartition(config.numPartitions)
         .saveAsTextFile(s"${config.output}.emb")
     }

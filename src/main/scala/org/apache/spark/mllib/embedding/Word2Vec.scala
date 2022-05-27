@@ -645,10 +645,27 @@ class Word2Vec extends Serializable with Logging {
         }.flatten
       }
 
-      val synAgg = partial.reduceByKey { case (v1, v2) =>
-          blas.saxpy(vectorSize, 1.0f, v2, 1, v1, 1)
-          v1
+      // SPARK-24666: do normalization for aggregating weights from partitions.
+      // Original Word2Vec either single-thread or multi-thread which do Hogwild-style aggregation.
+      // Our approach needs to do extra normalization, otherwise adding weights continuously may
+      // cause overflow on float and lead to infinity/-infinity weights.
+      val synAgg = partial.mapPartitions { iter =>
+        iter.map { case (id, vec) =>
+          (id, (vec, 1))
+        }
+      }.reduceByKey { (vc1: (Array[Float], Int), vc2: (Array[Float], Int)) =>
+        blas.saxpy(vectorSize, 1.0f, vc2._1, 1, vc1._1, 1)
+        (vc1._1, vc1._2 + vc2._2)
+      }.map { case (id, (vec, count)) =>
+        blas.sscal(vectorSize, 1.0f / count, vec, 1)
+        (id, vec)
       }.collect()
+
+//      partial.reduceByKey()
+//      val synAgg = partial.reduceByKey { case (v1, v2) =>
+//        blas.saxpy(vectorSize, 1.0f, v2, 1, v1, 1)
+//        v1
+//      }.collect()
       var i = 0
       while (i < synAgg.length) {
         val index = synAgg(i)._1
@@ -912,14 +929,14 @@ object Word2VecModel extends Loader[Word2VecModel] {
         val numWords = model.getVectors.size
         require(expectedVectorSize == vectorSize,
           s"Word2VecModel requires each word to be mapped to a vector of size " +
-            s"$expectedVectorSize, got vector of size $vectorSize")
+          s"$expectedVectorSize, got vector of size $vectorSize")
         require(expectedNumWords == numWords,
           s"Word2VecModel requires $expectedNumWords words, but got $numWords")
         model
       case _ => throw new Exception(
         s"Word2VecModel.load did not recognize model with (className, format version):" +
-          s"($loadedClassName, $loadedVersion).  Supported:\n" +
-          s"  ($classNameV1_0, 1.0)")
+        s"($loadedClassName, $loadedVersion).  Supported:\n" +
+        s"  ($classNameV1_0, 1.0)")
     }
   }
 }

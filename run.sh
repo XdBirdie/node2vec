@@ -19,13 +19,14 @@
 #         --logPath ./log.out > $log_path
 #   done
 # done
-cmd=randomwalk
+cmd=node2vec
+dataset=cit-Patents
 spark-submit --class com.navercorp.Main \
     --master spark://sepc724.se.cuhk.edu.hk:7077 \
     --driver-memory 50G --executor-memory 50G --executor-cores 4\
     --conf spark.driver.maxResultSize=10G\
     ./target/node2vec-0.1.2-SNAPSHOT.jar \
     --cmd $cmd --version one --directed true --indexed true --weighted false \
-    --walkLength 20 --numWalks 5 --partitions 64 --iter 10 --window 20 \
-    --logPath cit-Patents-One-timeline.log \
-    --input graph/cit-Patents --output emb/cit-Patents-One.emb > cit-Patents-One.log
+    --walkLength 20 --numWalks 5 --partitions 64 --iter 10 --window 20 --dim 32\
+    --logPath $dataset-One-timeline.log \
+    --input graph/$dataset --output emb/$dataset-One > log/$dataset-One.log
