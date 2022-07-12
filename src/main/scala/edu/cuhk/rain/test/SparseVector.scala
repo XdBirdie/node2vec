@@ -1,4 +1,4 @@
-package edu.cuhk.rain.linalg
+package edu.cuhk.rain.test
 
 import scala.collection.mutable.ArrayBuffer
 import scala.reflect.ClassTag
@@ -23,7 +23,7 @@ object SparseVector {
     new SparseVector(size, indices.toArray, values.toArray)
   }
 
-  private[linalg] val MAX_HASH_NNZ = 128
+  val MAX_HASH_NNZ = 128
 }
 
 
