@@ -39,14 +39,17 @@ class LDGPartitioner (val numPartition: Int, val numVertex: Int){
     )
   }
 
-  def partitioner: Partitioner = {
+  def thresholds: Array[Int] = {
     val a = new Array[Int](numPartition)
     var cnt = 0
     for (i <- 0 until numPartition) {
       a(i) = cnt
       cnt += partitions(i).size
     }
-    new IndexPartitioner(a)
+    a
   }
+
+  def partitioner: Partitioner = new IndexPartitioner(thresholds)
+
 
 }
