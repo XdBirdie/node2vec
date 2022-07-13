@@ -1,5 +1,6 @@
 package edu.cuhk.rain
 
+import edu.cuhk.rain.distributed.Distributed
 import edu.cuhk.rain.partitioner.Partitioner
 import edu.cuhk.rain.util.ParamsPaser._
 import org.apache.spark.{SparkConf, SparkContext}
@@ -34,11 +35,12 @@ object APP {
       partitions = 4,
       weighted = false,
       directed = false,
-      input = "./data/BlogCatalog",
+      input = "./data/karate.edgelist",
       cmd = Command.partition
     )
 
-    Partitioner.setup(context, params).partition()
+//    Partitioner.setup(context, params).partition()
+    Distributed.setup(context, params).start()
 
 //    val option: Option[Params] = parse(args)
 //    option match {

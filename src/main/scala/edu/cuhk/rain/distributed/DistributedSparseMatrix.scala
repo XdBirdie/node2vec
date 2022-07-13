@@ -29,7 +29,7 @@ class DistributedSparseMatrix(
       }
     }.groupByKey(partitioner).mapValues { col => {
       val seq: Seq[(Int, Double)] = col.toSeq
-      SparseVector.sparse(seq.length, seq)
+      SparseVector(seq.length, seq)
     }
     }
     // 计算乘法
@@ -66,5 +66,13 @@ class DistributedSparseMatrix(
       nCols = rows.first()._2.size
     }
     nCols
+  }
+}
+
+object DistributedSparseMatrix {
+  def fromEdgeList(edges: RDD[(Int, Int)], size: Int): Unit = {
+    val rows: RDD[(Int, SparseVector)] = edges.groupByKey().mapValues(it =>
+      SparseVector.ones(size, it.toArray))
+    new DistributedSparseMatrix(rows, size, size)
   }
 }

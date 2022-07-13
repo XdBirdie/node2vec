@@ -1,8 +1,28 @@
 package edu.cuhk.rain.partitioner
 
 import org.apache.spark.Partitioner
+import org.apache.spark.rdd.RDD
+import scala.collection.mutable
 
-class LDGPartitioner (val numPartition: Int, val numVertex: Int){
+class Partition (val id: Int, val capacity: Int){
+  val nodes = new mutable.TreeSet[Long]()
+  def size: Int = nodes.size
+
+  def addNode(node: Long):Unit = {
+    nodes.add(node)
+  }
+
+  def calc(neighbours: Array[Long]): Double = {
+    var cnt = 1
+    neighbours.foreach(u => if (nodes.contains(u)) cnt += 1)
+    val w: Double =  1 - nodes.size.toDouble / capacity
+    w * cnt
+  }
+}
+
+class LDGPartitioner (
+                       val numPartition: Int,
+                       val numVertex: Int) {
   val partitions: Array[Partition] = new Array[Partition](numPartition)
   val capacity: Int = (numVertex.toDouble / numPartition).ceil.toInt
   for (i <- 0 until numPartition) {

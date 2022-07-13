@@ -404,7 +404,7 @@ class BlockGraphMatrix(
     val rightDestinations: Map[(Int, Int), Set[Int]] = rightMatrix.map { case (rowIndex, colIndex) =>
       val leftCounterparts: Array[Int] = leftCounterpartsHelper.getOrElse(rowIndex, Array.empty[Int])
       val partitions: Array[Int] = leftCounterparts.map(b => partitioner.getPartition((b, colIndex)))
-      val midDimSplitIndex: Int = rowIndex % midDimSplitNum
+      val midDimSplitIndex = rowIndex % midDimSplitNum
       ((rowIndex, colIndex),
         partitions.toSet.map((pid: Int) => pid * midDimSplitNum + midDimSplitIndex))
     }.toMap

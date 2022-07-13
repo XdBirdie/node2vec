@@ -7,10 +7,13 @@ import scala.reflect.ClassTag
 
 
 object SparseVector {
-  def sparse(size: Int, indices: Array[Int], values: Array[Double]): SparseVector =
+  def ones(size: Int, indices: Array[Int]): SparseVector =
+    new SparseVector(size, indices, Array.fill(indices.length)(1.0))
+
+  def apply(size: Int, indices: Array[Int], values: Array[Double]): SparseVector =
     new SparseVector(size, indices, values)
 
-  def sparse(size: Int, elements: Seq[(Int, Double)]): SparseVector = {
+  def apply(size: Int, elements: Seq[(Int, Double)]): SparseVector = {
     require(size > 0, "The size of the requested sparse vector must be greater than 0.")
 
     val (indices, values) = elements.sortBy(_._1).unzip
@@ -32,6 +35,7 @@ object SparseVector {
 class SparseVector (val size: Int,
                     val indices: Array[Int],
                     val values: Array[Double]) extends Serializable {
+
   def toArray: Array[Double] = {
     val data = new Array[Double](size)
     var i = 0
@@ -73,14 +77,16 @@ class SparseVector (val size: Int,
   }
 
   def multiply(s: Double): SparseVector = {
-    new SparseVector(size, indices.clone(), indices.map(_*s))
+    new SparseVector(size, indices.clone(), values.map(_*s))
   }
 
   def multiply(s: Double, mul: BinaryOp[Double, Double]): SparseVector = {
-    new SparseVector(size, indices.clone(), indices.map(x => mul(s, x)))
+    new SparseVector(size, indices.clone(), values.map(x => mul(s, x)))
   }
 
   def add(other: SparseVector, add: Monoid[Double]): SparseVector = {
+    require(size == other.size)
+
     if (indices sameElements other.indices) {
       val res: Array[Double] = Array.ofDim(values.length)
       var i = 0
@@ -91,6 +97,7 @@ class SparseVector (val size: Int,
       }
       return new SparseVector(size, indices.clone(), res)
     }
+
     var (i, j) = (0, 0)
     val (l1, l2) = (indices.length, other.indices.length)
     val vbuf = new ArrayBuffer[Double]()
@@ -127,10 +134,14 @@ class SparseVector (val size: Int,
       j += 1
     }
 
-    new SparseVector(ibuf.size, ibuf.toArray, vbuf.toArray)
+    new SparseVector(size, ibuf.toArray, vbuf.toArray)
   }
 
   def add(other: SparseVector): SparseVector = {
     add(other, Monoid.monoidPlus)
+  }
+
+  override def toString: String = {
+    s"size: ${size}, values: [${indices.zip(values).mkString(", ")}]"
   }
 }

@@ -15,6 +15,10 @@ class DistributedSparseVector(
     new DistributedSparseVector(v.partitionBy(partitioner), size)
   }
 
+  def multiply(m: DistributedSparseMatrix): DistributedSparseVector = {
+    multiply(m, Semiring.semiringPlusMul)
+  }
+
   def multiply(m: DistributedSparseMatrix, semiring: Semiring[Double, Double]): DistributedSparseVector = {
     m.partitioner match {
       case Some(partitioner) => multiply(m, partitioner, semiring)
@@ -29,6 +33,11 @@ class DistributedSparseVector(
     }.reduceByKey((x0, x1) => semiring.add_op(x0, x1))
 
     new DistributedSparseVector(res, m.numCols())
+  }
+
+  def collect(): SparseVector = {
+    val value: Array[(Int, Double)] = v.sortByKey().collect()
+    SparseVector(size, value)
   }
 
   def cache(): this.type = {
