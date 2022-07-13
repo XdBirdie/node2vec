@@ -40,7 +40,7 @@ import org.apache.spark.{Partitioner, SparkException}
  *                     zero, the number of columns will be calculated when `numCols` is invoked.
  */
 
-class BlockMatrix(
+class BlockGraphMatrix(
                    val blocks: RDD[(Int, Matrix)],
                    private var nRows: Long,
                    private var nCols: Long) extends DistributedMatrix {
@@ -53,7 +53,7 @@ class BlockMatrix(
 //  val numRowBlocks: Int = math.ceil(numRows() * 1.0 / rowsPerBlock).toInt
 
   /**
-   * Alternate constructor for BlockMatrix without the input of the number of rows and columns.
+   * Alternate constructor for BlockGraphMatrix without the input of the number of rows and columns.
    *
    * @param blocks       The RDD of sub-matrix blocks ((blockRowIndex, blockColIndex), sub-matrix) that
    *                     form this distributed matrix. If multiple blocks with the same index exist, the
@@ -111,15 +111,15 @@ class BlockMatrix(
   }
 
 //  /**
-//   * Transpose this `BlockMatrix`. Returns a new `BlockMatrix` instance sharing the
+//   * Transpose this `BlockGraphMatrix`. Returns a new `BlockGraphMatrix` instance sharing the
 //   * same underlying data. Is a lazy operation.
 //   */
-//  def transpose: BlockMatrix = {
+//  def transpose: BlockGraphMatrix = {
 //    val transposedBlocks: RDD[((Int, Int), Matrix)] =
 //      blocks.map { case ((blockRowIndex, blockColIndex), mat) =>
 //        ((blockColIndex, blockRowIndex), mat.transpose)
 //      }
-//    new BlockMatrix(transposedBlocks, colsPerBlock, rowsPerBlock, nCols, nRows)
+//    new BlockGraphMatrix(transposedBlocks, colsPerBlock, rowsPerBlock, nCols, nRows)
 //  }
 
   /** Collects data and assembles a local dense breeze matrix (for test only). */
@@ -163,7 +163,7 @@ class BlockMatrix(
    * to a `DenseMatrix`. If two dense matrices are added, the output will also be a
    * `DenseMatrix`.
    */
-  def add(other: BlockMatrix): BlockMatrix =
+  def add(other: BlockGraphMatrix): BlockGraphMatrix =
     blockMap(other, (x: BM[Double], y: BM[Double]) => x + y)
 
   /**
@@ -174,26 +174,26 @@ class BlockMatrix(
    * from a `DenseMatrix`. If two dense matrices are subtracted, the output will also be a
    * `DenseMatrix`.
    */
-  def subtract(other: BlockMatrix): BlockMatrix =
+  def subtract(other: BlockGraphMatrix): BlockGraphMatrix =
     blockMap(other, (x: BM[Double], y: BM[Double]) => x - y)
 
-  private def check(other: BlockMatrix): Boolean = blockInfo sameElements other.blockInfo
+  private def check(other: BlockGraphMatrix): Boolean = blockInfo sameElements other.blockInfo
 
   /**
    * For given matrices `this` and `other` of compatible dimensions and compatible block dimensions,
    * it applies a binary function on their corresponding blocks.
    *
-   * @param other  The second BlockMatrix argument for the operator specified by `binMap`
+   * @param other  The second BlockGraphMatrix argument for the operator specified by `binMap`
    * @param binMap A function taking two breeze matrices and returning a breeze matrix
-   * @return A [[BlockMatrix]] whose blocks are the results of a specified binary map on blocks
+   * @return A [[BlockGraphMatrix]] whose blocks are the results of a specified binary map on blocks
    *         of `this` and `other`.
    *         Note: `blockMap` ONLY works for `add` and `subtract` methods and it does not support
    *         operators such as (a, b) => -a + b
    *         TODO: Make the use of zero matrices more storage efficient.
    */
   def blockMap(
-                other: BlockMatrix,
-                binMap: (BM[Double], BM[Double]) => BM[Double]): BlockMatrix = {
+                other: BlockGraphMatrix,
+                binMap: (BM[Double], BM[Double]) => BM[Double]): BlockGraphMatrix = {
     if (check(other)) {
       val newBlocks: RDD[(Int, Matrix)] = blocks.cogroup(other.blocks, createPartitioner())
         .map { case (blockRowIndex, (a, b)) =>
@@ -212,7 +212,7 @@ class BlockMatrix(
             new MatrixBlock(blockRowIndex, Matrices.fromBreeze(result))
           }
         }
-      new BlockMatrix(newBlocks, numRows(), numCols())
+      new BlockGraphMatrix(newBlocks, numRows(), numCols())
     } else {
       throw new SparkException("Cannot perform on matrices with different block dimensions")
     }
@@ -243,25 +243,25 @@ class BlockMatrix(
     GridPartitioner(numRowBlocks, numColBlocks, suggestedNumPartitions = blocks.partitions.length)
 
   /**
-   * Left multiplies this [[BlockMatrix]] to `other`, another [[BlockMatrix]]. The `colsPerBlock`
+   * Left multiplies this [[BlockGraphMatrix]] to `other`, another [[BlockGraphMatrix]]. The `colsPerBlock`
    * of this matrix must equal the `rowsPerBlock` of `other`. If `other` contains
    * `SparseMatrix`, they will have to be converted to a `DenseMatrix`. The output
-   * [[BlockMatrix]] will only consist of blocks of `DenseMatrix`. This may cause
+   * [[BlockGraphMatrix]] will only consist of blocks of `DenseMatrix`. This may cause
    * some performance issues until support for multiplying two sparse matrices is added.
    *
    * @note The behavior of multiply has changed in 1.6.0. `multiply` used to throw an error when
    *       there were blocks with duplicate indices. Now, the blocks with duplicate indices will be added
    *       with each other.
    */
-  def multiply(other: BlockMatrix): BlockMatrix = {
+  def multiply(other: BlockGraphMatrix): BlockGraphMatrix = {
     multiply(other, 1)
   }
 
   /**
-   * Left multiplies this [[BlockMatrix]] to `other`, another [[BlockMatrix]]. The `colsPerBlock`
+   * Left multiplies this [[BlockGraphMatrix]] to `other`, another [[BlockGraphMatrix]]. The `colsPerBlock`
    * of this matrix must equal the `rowsPerBlock` of `other`. If `other` contains
    * `SparseMatrix`, they will have to be converted to a `DenseMatrix`. The output
-   * [[BlockMatrix]] will only consist of blocks of `DenseMatrix`. This may cause
+   * [[BlockGraphMatrix]] will only consist of blocks of `DenseMatrix`. This may cause
    * some performance issues until support for multiplying two sparse matrices is added.
    * Blocks with duplicate indices will be added with each other.
    *
@@ -274,8 +274,8 @@ class BlockMatrix(
    *                        which in some cases also reduces total shuffled data.
    */
   def multiply(
-                other: BlockMatrix,
-                numMidDimSplits: Int): BlockMatrix = {
+                other: BlockGraphMatrix,
+                numMidDimSplits: Int): BlockGraphMatrix = {
     require(numCols() == other.numRows(), "The number of columns of A and the number of rows " +
       s"of B must be equal. A.numCols: ${numCols()}, B.numRows: ${other.numRows()}. If you " +
       "think they should be equal, try setting the dimensions of A and B explicitly while " +
@@ -314,7 +314,7 @@ class BlockMatrix(
         }
       }.reduceByKey(resultPartitioner, (a, b) => a + b).mapValues(Matrices.fromBreeze)
       // TODO: Try to use aggregateByKey instead of reduceByKey to get rid of intermediate matrices
-      new BlockMatrix(newBlocks, rowsPerBlock, other.colsPerBlock, numRows(), other.numCols())
+      new BlockGraphMatrix(newBlocks, rowsPerBlock, other.colsPerBlock, numRows(), other.numCols())
     } else {
       throw new SparkException("colsPerBlock of A doesn't match rowsPerBlock of B. " +
         s"A.colsPerBlock: $colsPerBlock, B.rowsPerBlock: ${other.rowsPerBlock}")
@@ -329,14 +329,14 @@ class BlockMatrix(
    * The `colsPerBlock` of this matrix must equal the `rowsPerBlock` of `other`.
    * Exposed for tests.
    *
-   * @param other       The BlockMatrix to multiply
+   * @param other       The BlockGraphMatrix to multiply
    * @param partitioner The partitioner that will be used for the resulting matrix `C = A * B`
    * @return A tuple of [[BlockDestinations]]. The first element is the Map of the set of partitions
    *         that we need to shuffle each blocks of `this`, and the second element is the Map for
    *         `other`.
    */
   def simulateMultiply(
-                        other: BlockMatrix,
+                        other: BlockGraphMatrix,
                         partitioner: GridPartitioner,
                         midDimSplitNum: Int): (BlockDestinations, BlockDestinations) = {
     val leftMatrix = blockInfo.keys.collect()
