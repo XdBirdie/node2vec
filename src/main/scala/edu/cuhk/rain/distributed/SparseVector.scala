@@ -1,4 +1,6 @@
-package edu.cuhk.rain.test
+package edu.cuhk.rain.distributed
+
+import edu.cuhk.rain.graphBLAS.{BinaryOp, Monoid, Semiring}
 
 import scala.collection.mutable.ArrayBuffer
 import scala.reflect.ClassTag
@@ -74,40 +76,40 @@ class SparseVector (val size: Int,
     new SparseVector(size, indices.clone(), indices.map(_*s))
   }
 
-  def add(other: SparseVector): SparseVector = {
+  def multiply(s: Double, mul: BinaryOp[Double, Double]): SparseVector = {
+    new SparseVector(size, indices.clone(), indices.map(x => mul(s, x)))
+  }
+
+  def add(other: SparseVector, add: Monoid[Double]): SparseVector = {
     if (indices sameElements other.indices) {
-      val res: Array[Double] = values.clone()
+      val res: Array[Double] = Array.ofDim(values.length)
       var i = 0
       val len: Int = res.length
       while (i < len) {
-        res(i) += other.values(i)
+        res(i) = add(values(i), other.values(i))
         i += 1
       }
       return new SparseVector(size, indices.clone(), res)
     }
-    var i = 0
-    var j = 0
-    val l1: Int = indices.length
-    val l2: Int = other.indices.length
-
+    var (i, j) = (0, 0)
+    val (l1, l2) = (indices.length, other.indices.length)
     val vbuf = new ArrayBuffer[Double]()
     val ibuf = new ArrayBuffer[Int]()
-
     while (i < l1 && j < l2) {
       val indi: Int = indices(i)
       val indj: Int = other.indices(j)
 
       if (indi == indj) {
-        vbuf.append(values(i) + other.values(j))
+        vbuf.append(add(values(i), other.values(j)))
         ibuf.append(indi)
         i += 1
         j += 1
       } else if (indi < indj) {
-        vbuf.append(values(i))
+        vbuf.append(add(values(i)))
         ibuf.append(indi)
         i += 1
       } else {
-        vbuf.append(other.values(j))
+        vbuf.append(add(other.values(j)))
         ibuf.append(indj)
         j += 1
       }
@@ -115,16 +117,20 @@ class SparseVector (val size: Int,
 
     while (i < l1) {
       ibuf.append(indices(i))
-      vbuf.append(values(i))
+      vbuf.append(add(values(i)))
       i += 1
     }
 
     while (j < l2) {
       ibuf.append(other.indices(j))
-      vbuf.append(other.values(j))
+      vbuf.append(add(other.values(j)))
       j += 1
     }
 
     new SparseVector(ibuf.size, ibuf.toArray, vbuf.toArray)
+  }
+
+  def add(other: SparseVector): SparseVector = {
+    add(other, Monoid.monoidPlus)
   }
 }

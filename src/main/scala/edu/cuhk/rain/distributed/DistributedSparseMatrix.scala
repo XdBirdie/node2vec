@@ -1,17 +1,16 @@
-package edu.cuhk.rain.test
+package edu.cuhk.rain.distributed
 
-import edu.cuhk.rain.test
 import org.apache.spark.Partitioner
 import org.apache.spark.Partitioner.defaultPartitioner
 import org.apache.spark.rdd.RDD
 
 class DistributedSparseMatrix(
-                               var rows: RDD[(Int, test.SparseVector)],
+                               var rows: RDD[(Int, SparseVector)],
                                private var nRows: Int,
                                private var nCols: Int) {
   lazy val partitioner: Option[Partitioner] = rows.partitioner
 
-  def this(rows: RDD[(Int, test.SparseVector)]) = this(rows, 0, 0)
+  def this(rows: RDD[(Int, SparseVector)]) = this(rows, 0, 0)
 
   def partitionBy(partitioner: Partitioner): DistributedSparseMatrix = {
     new DistributedSparseMatrix(rows.partitionBy(partitioner), numRows(), numCols())
@@ -24,7 +23,7 @@ class DistributedSparseMatrix(
   def multiply(other: DistributedSparseMatrix, partitioner: Partitioner): DistributedSparseMatrix = {
     require(numCols() == other.numRows())
     // 左侧的数据由行形式转为列形式
-    val colsRDD: RDD[(Int, test.SparseVector)] = rows.flatMap { case (row, vector) =>
+    val colsRDD: RDD[(Int, SparseVector)] = rows.flatMap { case (row, vector) =>
       vector.mapActive { case (col, value) =>
         (col, (row, value))
       }
@@ -34,7 +33,7 @@ class DistributedSparseMatrix(
     }
     }
     // 计算乘法
-    val res: RDD[(Int, test.SparseVector)] =
+    val res: RDD[(Int, SparseVector)] =
       other.rows.join(colsRDD, partitioner).flatMap { case (_, (right, left)) =>
         left.mapActive { case (i, rowV) => (i, right.multiply(rowV)) }
       }.reduceByKey(partitioner, _ add _)
@@ -51,7 +50,7 @@ class DistributedSparseMatrix(
     this
   }
 
-  def collect(): (Array[(Int, test.SparseVector)], Int, Int) = {
+  def collect(): (Array[(Int, SparseVector)], Int, Int) = {
     (rows.collect(), numRows(), numCols())
   }
 
