@@ -15,6 +15,12 @@ case object BinaryOp {
   lazy val binaryMin = new BinaryOp[Double, Double](math.min)
   lazy val binaryMax = new BinaryOp[Double, Double](math.max)
 
+  lazy val binaryMaxfrac = new BinaryOp[Double, Double]((x, y) => {
+    val px: Double = x - x.floor
+    val py: Double = y - y.floor
+    if (px >= py) x else y
+  })
+
   lazy val binaryFirst = new BinaryOp[Double, Double]((u, _) => u)
   lazy val binarySecond = new BinaryOp[Double, Double]((_, v) => v)
 }

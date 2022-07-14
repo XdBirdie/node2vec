@@ -15,6 +15,12 @@ object SparseVector {
   def ids(size: Int, indices: Array[Int]): SparseVector =
     new SparseVector(size, indices.map(ind => (ind, ind.toDouble)))
 
+  def random(size: Int, indices: Array[Int]): SparseVector =
+    new SparseVector(size, indices zip Array.fill(indices.length)(math.random))
+
+  def random(size: Int): SparseVector =
+    random(size, Array.range(0, size))
+
   def apply(size: Int, indices: Array[Int], values: Array[Double]): SparseVector =
     new SparseVector(size, indices.zip(values))
 

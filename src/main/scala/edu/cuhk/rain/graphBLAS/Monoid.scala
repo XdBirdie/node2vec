@@ -20,4 +20,6 @@ object Monoid {
 
   lazy val monoidMin = new Monoid[Double](BinaryOp.binaryMin, Double.MaxValue)
   lazy val monoidMax = new Monoid[Double](BinaryOp.binaryMax, Double.MinValue)
+
+  lazy val monoidMaxfrac = new Monoid[Double](BinaryOp.binaryMaxfrac, 0)
 }

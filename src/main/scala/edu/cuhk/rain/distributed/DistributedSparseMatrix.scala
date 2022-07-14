@@ -83,8 +83,10 @@ object DistributedSparseMatrix {
       edges.mapPartitions(it => it.flatMap { case (u, v) => f(u, v) })
 
     val rows: RDD[(Int, SparseVector)] = {
-      if (ids) value.groupByKey().mapValues(it => SparseVector.ids(size, it.toArray))
-      else value.groupByKey().mapValues(it => SparseVector.ones(size, it.toArray))
+      if (ids) value.groupByKey().map{ case (u, it) =>
+        val indices: Array[Int] = it.toArray
+        (u, new SparseVector(size, indices zip Array.fill(indices.length)(u.toDouble)))
+      } else value.groupByKey().mapValues(it => SparseVector.ones(size, it.toArray))
     }
     new DistributedSparseMatrix(rows, size, size)
   }

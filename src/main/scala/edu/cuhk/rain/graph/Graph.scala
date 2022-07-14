@@ -17,6 +17,10 @@ class Graph private(
     if (this.weighted) toEdgeTriplet.count()
     else toEdgelist.count()
 
+  lazy val nodelist: RDD[Int] = {
+    toEdgelist.flatMap{case (u, v) => Array(u, v)}.distinct(numPartitions)
+  }
+
   lazy val toAdj: RDD[(Int, Array[(Int, Double)])] = {
     val edgeCreator: (Int, Int, Double) => Array[(Int, Array[(Int, Double)])] =
       if (directed) createDirectedEdge else createUndirectedEdge
@@ -26,24 +30,24 @@ class Graph private(
     toEdgeTriplet.mapPartitions {
       _.flatMap { case (u, v, w) => bcEdgeCreator.value(u, v, w) }
     }.reduceByKey(_ ++ _)
-  }
+  }.cache()
 
   lazy val toEdgelist: RDD[(Int, Int)] = {
     (if (weighted)
       edgeTriplet.mapPartitions(it => it.map(e => (e._1, e._2)))
     else edgelist)
-  }
+  }.cache()
 
   lazy val toEdgeTriplet: RDD[(Int, Int, Double)] = {
     (if (weighted) edgeTriplet
     else edgelist.mapPartitions(it => it.map(e => (e._1, e._2, 1.0))))
-  }
+  }.cache()
 
   lazy val toNeighbors: RDD[(Int, Array[Int])] = {
     (if (directed) toEdgelist else toEdgelist.mapPartitions {
       _.flatMap { case (u, v) => Array((u, v), (v, u)) }
     }).groupByKey().mapValues(_.toArray)
-  }
+  }.cache()
 
   private val context: SparkContext = Graph.context
 

@@ -2,11 +2,14 @@ package edu.cuhk.rain
 
 import edu.cuhk.rain.distributed.Distributed
 import edu.cuhk.rain.partitioner.Partitioner
+import edu.cuhk.rain.randomwalk.RandomWalk
+import edu.cuhk.rain.util.ParamsPaser
 import edu.cuhk.rain.util.ParamsPaser._
+import org.apache.spark.internal.Logging
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.{SparkConf, SparkContext}
 
-object APP {
+object APP extends Logging{
   def start(param: Params): Unit = {
     val spark: SparkSession = SparkSession
       .builder()
@@ -34,12 +37,21 @@ object APP {
       partitions = 4,
       weighted = false,
       directed = false,
+//      input = "./data/karate.edgelist",
       input = "./data/BlogCatalog",
+      walkLength = 20,
+      numWalks = 5,
       cmd = Command.partition
     )
 
+    RandomWalk.setup(context, params).start().debug()
+
+//    ParamsPaser.parse(args) match {
+//      case Some(params) => RandomWalk.setup(context, params).start() //.debug()
+//      case _ => logError("error params!")
+//    }
 //    Partitioner.setup(context, params).partition()
-        Distributed.setup(context, params).start()
+//        Distributed.setup(context, params).start()
 
     //    val option: Option[Params] = parse(args)
     //    option match {

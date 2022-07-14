@@ -29,7 +29,9 @@ class DistributedSparseVector(
   def multiply(m: DistributedSparseMatrix, partitioner: Partitioner, semiring: Semiring[Double, Double]): DistributedSparseVector = {
     require(size == m.numRows())
     val res: RDD[(Int, Double)] = m.rows.join(v, partitioner).flatMap { case (_, (ov, s)) =>
-      ov.multiply(s, semiring.mul_Op).mapActive { case (i, v) => (i, v) }
+      val values: Array[(Int, Double)] = ov.multiply(s, semiring.mul_Op).values
+//      println(s"values = ${values.mkString(", ")}")
+      values
     }.reduceByKey((x0, x1) => semiring.add_op(x0, x1))
 
     new DistributedSparseVector(res, m.numCols())
@@ -54,7 +56,13 @@ class DistributedSparseVector(
 
 object DistributedSparseVector {
   def fromSparseVector(sparseVector: SparseVector, sc: SparkContext): DistributedSparseVector = {
-    val value: RDD[(Int, Double)] = sc.makeRDD(sparseVector.mapActive((u, v) => (u, v)))
+    val value: RDD[(Int, Double)] = sc.makeRDD(sparseVector.values)
     new DistributedSparseVector(value, sparseVector.size)
+  }
+
+  def random(size: Int, sc: SparkContext): DistributedSparseVector = {
+    val values: RDD[(Int, Double)] =
+      sc.makeRDD(Array.range(0, size) zip Array.fill(size)(math.random))
+    new DistributedSparseVector(values, size)
   }
 }

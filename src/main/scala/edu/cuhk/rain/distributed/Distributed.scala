@@ -58,7 +58,6 @@ case object Distributed {
     
     val node2id: Array[(Int, Int)] = ldg.node2id
     
-    
     val matrix: DistributedSparseMatrix = graph.toMatrix(node2id, numNodes).partitionBy(partitioner)
     matrix.rows.count()
 //    matrix.collect()._1.foreach(println)
