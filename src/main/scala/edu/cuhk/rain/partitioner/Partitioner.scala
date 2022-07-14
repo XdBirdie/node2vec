@@ -29,7 +29,7 @@ case object Partitioner {
     partitioner.partition(graph)
     //    tuples.foreach{case (u, vs) => partitioner.addNode(u, vs)}
 
-    val node2partition: Map[Long, Int] = partitioner.node2partition
+    val node2partition: Map[Int, Int] = partitioner.node2partition
     println(node2partition.size)
     //    node2partition.foreach(println)
 
@@ -38,7 +38,7 @@ case object Partitioner {
     //      if (node2partition(u) != node2partition(v)) sum += 1
     //    }}
 
-    val bcMap: Broadcast[Map[Long, Int]] = context.broadcast(node2partition)
+    val bcMap: Broadcast[Map[Int, Int]] = context.broadcast(node2partition)
     val sum: LongAccumulator = context.longAccumulator("cut")
     //    graph.toEdgelist.collect().foreach(println)
     graph.toEdgeTriplet.foreachPartition { it =>
