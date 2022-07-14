@@ -1,9 +1,9 @@
 package edu.cuhk.rain.graphBLAS
 
-class Semiring[OUT, IN] (
-               val add_op: Monoid[OUT],
-               val mul_Op: BinaryOp[OUT, IN]
-               ) extends Serializable {
+class Semiring[OUT, IN](
+                         val add_op: Monoid[OUT],
+                         val mul_Op: BinaryOp[OUT, IN]
+                       ) extends Serializable {
 
 }
 

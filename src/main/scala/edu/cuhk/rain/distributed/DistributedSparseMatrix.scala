@@ -70,9 +70,22 @@ class DistributedSparseMatrix(
 }
 
 object DistributedSparseMatrix {
-  def fromEdgeList(edges: RDD[(Int, Int)], size: Int): Unit = {
-    val rows: RDD[(Int, SparseVector)] = edges.groupByKey().mapValues(it =>
-      SparseVector.ones(size, it.toArray))
+  def fromEdgeList(
+                    edges: RDD[(Int, Int)],
+                    size: Int,
+                    directed: Boolean,
+                    ids: Boolean=false
+                  ): DistributedSparseMatrix = {
+    val f: (Int, Int) => Array[(Int, Int)] =
+      if (directed) (u: Int, v: Int) => Array((u, v))
+      else (u: Int, v: Int) => Array((u, v), (v, u))
+    val value: RDD[(Int, Int)] =
+      edges.mapPartitions(it => it.flatMap { case (u, v) => f(u, v) })
+
+    val rows: RDD[(Int, SparseVector)] = {
+      if (ids) value.groupByKey().mapValues(it => SparseVector.ids(size, it.toArray))
+      else value.groupByKey().mapValues(it => SparseVector.ones(size, it.toArray))
+    }
     new DistributedSparseMatrix(rows, size, size)
   }
 }

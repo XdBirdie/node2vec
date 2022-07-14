@@ -1,9 +1,9 @@
 package edu.cuhk.rain.distributed
 
 import edu.cuhk.rain.graphBLAS.Semiring
-import org.apache.spark.{Partitioner, SparkContext}
 import org.apache.spark.Partitioner.defaultPartitioner
 import org.apache.spark.rdd.RDD
+import org.apache.spark.{Partitioner, SparkContext}
 
 // row vector
 class DistributedSparseVector(

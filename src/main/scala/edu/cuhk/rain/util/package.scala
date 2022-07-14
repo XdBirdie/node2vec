@@ -1,9 +1,5 @@
 package edu.cuhk.rain
 
-import org.apache.spark.broadcast.Broadcast
-import org.apache.spark.graphx.VertexId
-import org.apache.spark.rdd.RDD
-
 package object util {
 
 

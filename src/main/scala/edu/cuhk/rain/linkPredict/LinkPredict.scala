@@ -17,29 +17,6 @@ case object LinkPredict {
   var directed = false
   var logger: Logger = LoggerFactory.getLogger(LinkPredict.getClass)
 
-  def negativeSample(edgeList: Array[(Long, Long)], nodeList: Array[Long], ratio: Double): Array[(Long, Long)] = {
-    logger.warn("begin negative sample!")
-    val graph: Map[Long, ArrayBuffer[Long]] = nodeList.map((_: Long, ArrayBuffer[Long]())).toMap
-    edgeList.foreach { case (u, v) => graph(u).append(v) }
-    logger.warn("calculate graph over!")
-    val nodesNum: Int = nodeList.length
-    var cnt = 0
-    val samples: Map[Long, Array[Long]] = graph.map { case (u, neighbors) =>
-      val n: Int = (ratio * neighbors.length).toInt
-      var samples: Array[Long] = new Array[Long](n + neighbors.length).map {
-        (_: Long) => nodeList(Random.nextInt(nodesNum))
-      }
-      samples = samples.distinct.diff(neighbors).distinct.take(n)
-      cnt += 1
-      if (cnt % 100000 == 0) {
-        logger.warn(s"$cnt: ($u, ${neighbors.length}, ${n}, ${samples.length}\n[${neighbors.mkString(", ")}]\n[${samples.mkString(", ")}])")
-      }
-      (u, samples)
-    }
-    logger.warn("sample over!")
-    samples.flatMap { case (u, vs) => vs.map((u, _: Long)) }.toArray
-  }
-
   def negSampleByPair(edgeList: Array[(Long, Long)], nodeList: Array[Long], ratio: Double): Array[(Long, Long)] = {
     val edgeSet: Set[(Long, Long)] = edgeList.toSet
     val negativeSet = new mutable.HashSet[(Long, Long)]()
@@ -53,23 +30,6 @@ case object LinkPredict {
       }
     }
     negativeSet.toArray
-  }
-
-  def edgeEmbedding(edgeList: Array[(Long, Long)], embedding: Array[(Long, Array[Double])]): Array[Double] = {
-    val map: Map[Long, Array[Double]] = embedding.toMap
-    edgeList.map { case (u, v) =>
-      if (map.contains(u) && map.contains(v)) {
-        val vec1: Array[Double] = map(u)
-        val vec2: Array[Double] = map(v)
-        val len1: Double = math.sqrt(vec1.map(x => x * x).sum)
-        val len2: Double = math.sqrt(vec2.map(x => x * x).sum)
-        vec1.zip(vec2).map { case (x1, x2) => x1 * x2 }.sum / len1 / len2
-      } else Double.NaN
-    }.filter(_ != Double.NaN)
-  }
-
-  def getNodeList(edgeList: Array[(Long, Long)]): Array[Long] = {
-    edgeList.flatMap((x: (Long, Long)) => Array(x._1, x._2)).distinct
   }
 
   def setup(context: SparkContext, param: Params): this.type = {
@@ -96,17 +56,6 @@ case object LinkPredict {
 
     logger.warn(s"negSum: $negSum, posGTNeg: $posGTNeg")
     posGTNeg.toDouble / posNum.toDouble / negNum.toDouble
-  }
-
-  def calAUC2(dataset: Array[(Double, Int)]): Double = {
-    val totalNum: Long = dataset.length
-    val posNum: Long = dataset.count(_._2 > 0)
-    val negNum: Long = totalNum - posNum
-
-    val sum: Long = dataset.sortBy(_._1).zipWithIndex.map { case ((_, label), rnk) =>
-      if (label == 1) rnk + 1L else 0L
-    }.sum
-    (sum - posNum * (posNum + 1) / 2).toDouble / (posNum * negNum)
   }
 
   def run(): Unit = {
@@ -146,5 +95,56 @@ case object LinkPredict {
     val truths: Array[Int] = Array.fill(posSamples.length)(1) ++ Array.fill(negSamples.length)(0)
     logger.warn(s"scores get! size: ${scores.length}")
     logger.warn(s"Area under ROC 2 = ${calAUC2(scores.zip(truths))}")
+  }
+
+  def negativeSample(edgeList: Array[(Long, Long)], nodeList: Array[Long], ratio: Double): Array[(Long, Long)] = {
+    logger.warn("begin negative sample!")
+    val graph: Map[Long, ArrayBuffer[Long]] = nodeList.map((_: Long, ArrayBuffer[Long]())).toMap
+    edgeList.foreach { case (u, v) => graph(u).append(v) }
+    logger.warn("calculate graph over!")
+    val nodesNum: Int = nodeList.length
+    var cnt = 0
+    val samples: Map[Long, Array[Long]] = graph.map { case (u, neighbors) =>
+      val n: Int = (ratio * neighbors.length).toInt
+      var samples: Array[Long] = new Array[Long](n + neighbors.length).map {
+        (_: Long) => nodeList(Random.nextInt(nodesNum))
+      }
+      samples = samples.distinct.diff(neighbors).distinct.take(n)
+      cnt += 1
+      if (cnt % 100000 == 0) {
+        logger.warn(s"$cnt: ($u, ${neighbors.length}, ${n}, ${samples.length}\n[${neighbors.mkString(", ")}]\n[${samples.mkString(", ")}])")
+      }
+      (u, samples)
+    }
+    logger.warn("sample over!")
+    samples.flatMap { case (u, vs) => vs.map((u, _: Long)) }.toArray
+  }
+
+  def edgeEmbedding(edgeList: Array[(Long, Long)], embedding: Array[(Long, Array[Double])]): Array[Double] = {
+    val map: Map[Long, Array[Double]] = embedding.toMap
+    edgeList.map { case (u, v) =>
+      if (map.contains(u) && map.contains(v)) {
+        val vec1: Array[Double] = map(u)
+        val vec2: Array[Double] = map(v)
+        val len1: Double = math.sqrt(vec1.map(x => x * x).sum)
+        val len2: Double = math.sqrt(vec2.map(x => x * x).sum)
+        vec1.zip(vec2).map { case (x1, x2) => x1 * x2 }.sum / len1 / len2
+      } else Double.NaN
+    }.filter(_ != Double.NaN)
+  }
+
+  def getNodeList(edgeList: Array[(Long, Long)]): Array[Long] = {
+    edgeList.flatMap((x: (Long, Long)) => Array(x._1, x._2)).distinct
+  }
+
+  def calAUC2(dataset: Array[(Double, Int)]): Double = {
+    val totalNum: Long = dataset.length
+    val posNum: Long = dataset.count(_._2 > 0)
+    val negNum: Long = totalNum - posNum
+
+    val sum: Long = dataset.sortBy(_._1).zipWithIndex.map { case ((_, label), rnk) =>
+      if (label == 1) rnk + 1L else 0L
+    }.sum
+    (sum - posNum * (posNum + 1) / 2).toDouble / (posNum * negNum)
   }
 }

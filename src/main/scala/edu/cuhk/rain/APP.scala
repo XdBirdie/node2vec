@@ -3,13 +3,11 @@ package edu.cuhk.rain
 import edu.cuhk.rain.distributed.Distributed
 import edu.cuhk.rain.partitioner.Partitioner
 import edu.cuhk.rain.util.ParamsPaser._
-import org.apache.spark.{SparkConf, SparkContext}
 import org.apache.spark.sql.SparkSession
-
-import scala.sys.exit
+import org.apache.spark.{SparkConf, SparkContext}
 
 object APP {
-  def start(param: Params):Unit = {
+  def start(param: Params): Unit = {
     val spark: SparkSession = SparkSession
       .builder()
       .appName("edu.cuhk.rain.node2vec")
@@ -26,8 +24,8 @@ object APP {
     }
 
   }
-  
-  def main(args: Array[String]):Unit = {
+
+  def main(args: Array[String]): Unit = {
     val conf: SparkConf = new SparkConf().setAppName("edu.cuhk.rain.node2vec").setMaster("local[*]")
     val context = new SparkContext(conf)
     context.setLogLevel("warn")
@@ -36,17 +34,17 @@ object APP {
       partitions = 4,
       weighted = false,
       directed = false,
-      input = "./data/karate.edgelist",
+      input = "./data/BlogCatalog",
       cmd = Command.partition
     )
 
-    Partitioner.setup(context, params).partition()
-//    Distributed.setup(context, params).start()
+//    Partitioner.setup(context, params).partition()
+        Distributed.setup(context, params).start()
 
-//    val option: Option[Params] = parse(args)
-//    option match {
-//      case Some(param) => start(param)
-//      case _ => exit(1)
-//    }
+    //    val option: Option[Params] = parse(args)
+    //    option match {
+    //      case Some(param) => start(param)
+    //      case _ => exit(1)
+    //    }
   }
 }

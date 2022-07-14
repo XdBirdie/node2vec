@@ -4,65 +4,66 @@ import edu.cuhk.rain.distributed.DistributedSparseMatrix
 import edu.cuhk.rain.util.ParamsPaser.Params
 import org.apache.spark.SparkContext
 import org.apache.spark.broadcast.Broadcast
-import org.apache.spark.graphx.EdgeTriplet
 import org.apache.spark.rdd.RDD
-import org.apache.spark.sql.SparkSession
 
 import scala.util.Try
 
 class Graph private(
-                   private val directed: Boolean
+                     val directed: Boolean,
+                     val numPartitions: Int
                    ) {
-
-  private def setEdgelist(edges: RDD[(Long, Long)]): this.type = {
-    this.edgelist = edges
-    this.weighted = false
-    this
-  }
-
-  private def setEdgeTriplet(edges: RDD[(Long, Long, Double)]): this.type = {
-    this.edgeTriplet = edges
-    this.weighted = true
-    this
-  }
-
-  private val context: SparkContext = Graph.context
-
-  private var weighted: Boolean = _
-  private var edgeTriplet: RDD[(Long, Long, Double)] = _
-  private var edgelist: RDD[(Long, Long)] = _
 
   lazy val numEdges: Long =
     if (this.weighted) toEdgeTriplet.count()
     else toEdgelist.count()
 
-  lazy val toAdj: RDD[(Long, Array[(Long, Double)])] = {
-    val edgeCreator: (Long, Long, Double) => Array[(Long, Array[(Long, Double)])] =
+  lazy val toAdj: RDD[(Int, Array[(Int, Double)])] = {
+    val edgeCreator: (Int, Int, Double) => Array[(Int, Array[(Int, Double)])] =
       if (directed) createDirectedEdge else createUndirectedEdge
-    val bcEdgeCreator: Broadcast[(Long, Long, Double) => Array[(Long, Array[(Long, Double)])]] =
+    val bcEdgeCreator: Broadcast[(Int, Int, Double) => Array[(Int, Array[(Int, Double)])]] =
       context.broadcast(edgeCreator)
 
     toEdgeTriplet.mapPartitions {
-      _.flatMap { case (u, v, w) => bcEdgeCreator.value(u, v, w)}
-    }.reduceByKey(_ ++ _).cache()
+      _.flatMap { case (u, v, w) => bcEdgeCreator.value(u, v, w) }
+    }.reduceByKey(_ ++ _)
   }
 
-  lazy val toEdgelist: RDD[(Long, Long)] = {
+  lazy val toEdgelist: RDD[(Int, Int)] = {
     (if (weighted)
       edgeTriplet.mapPartitions(it => it.map(e => (e._1, e._2)))
-    else edgelist).cache()
+    else edgelist)
   }
 
-  lazy val toEdgeTriplet: RDD[(Long, Long, Double)] = {
+  lazy val toEdgeTriplet: RDD[(Int, Int, Double)] = {
     (if (weighted) edgeTriplet
-    else edgelist.mapPartitions(it => it.map(e => (e._1, e._2, 1.0)))).cache()
+    else edgelist.mapPartitions(it => it.map(e => (e._1, e._2, 1.0))))
   }
 
-  lazy val toNeighbors: RDD[(Long, Array[Long])] = {
-    (if (directed) toEdgelist else toEdgelist.mapPartitions{
-      _.flatMap{case (u, v) => Array((u, v), (v, u))}
-    }).groupByKey().mapValues(_.toArray).cache()
+  lazy val toNeighbors: RDD[(Int, Array[Int])] = {
+    (if (directed) toEdgelist else toEdgelist.mapPartitions {
+      _.flatMap { case (u, v) => Array((u, v), (v, u)) }
+    }).groupByKey().mapValues(_.toArray)
   }
+
+  private val context: SparkContext = Graph.context
+
+  private val createUndirectedEdge: (Int, Int, Double) => Array[(Int, Array[(Int, Double)])]
+  = (srcId: Int, dstId: Int, weight: Double) => {
+    Array(
+      (srcId, Array((dstId, weight))),
+      (dstId, Array((srcId, weight)))
+    )
+  }
+
+  private val createDirectedEdge: (Int, Int, Double) => Array[(Int, Array[(Int, Double)])]
+  = (srcId: Int, dstId: Int, weight: Double) => {
+    Array(
+      (srcId, Array((dstId, weight)))
+    )
+  }
+  private var weighted: Boolean = _
+  private var edgeTriplet: RDD[(Int, Int, Double)] = _
+  private var edgelist: RDD[(Int, Int)] = _
 
   def unpersist(blocking: Boolean): this.type = {
     toAdj.unpersist(blocking)
@@ -71,20 +72,35 @@ class Graph private(
     this
   }
 
-  private val createUndirectedEdge: (Long, Long, Double) => Array[(Long, Array[(Long, Double)])]
-    = (srcId: Long, dstId: Long, weight: Double) => {
-      Array(
-        (srcId, Array((dstId, weight))),
-        (dstId, Array((srcId, weight)))
-      )
+  def toMatrix(node2id: RDD[(Int, Int)]): DistributedSparseMatrix = {
+    val numNodes: Int = node2id.cache().map(_._2).max()
+    val neighbors: RDD[(Int, Int)] = toEdgelist.join(node2id).map{
+      case (u, (v, uid)) => (v, uid)
+    }.join(node2id).map {
+      case (v, (uid, vid)) => (uid, vid)
     }
+    DistributedSparseMatrix.fromEdgeList(neighbors, numNodes, directed, ids = true)
+  }
 
-  private val createDirectedEdge: (Long, Long, Double) => Array[(Long, Array[(Long, Double)])]
-    = (srcId: Long, dstId: Long, weight: Double) => {
-      Array(
-        (srcId, Array((dstId, weight)))
-      )
+  def toMatrix(node2id: Array[(Int, Int)], numNodes: Int): DistributedSparseMatrix = {
+    val bcNode2id: Broadcast[Map[Int, Int]] = context.broadcast(node2id.toMap)
+    val neighbors: RDD[(Int, Int)] = toEdgelist.map {
+      case (u, v) => (bcNode2id.value(u), bcNode2id.value(v))
     }
+    DistributedSparseMatrix.fromEdgeList(neighbors, numNodes, directed, ids = true)
+  }
+
+  private def setEdgelist(edges: RDD[(Int, Int)]): this.type = {
+    this.edgelist = edges
+    this.weighted = false
+    this
+  }
+
+  private def setEdgeTriplet(edges: RDD[(Int, Int, Double)]): this.type = {
+    this.edgeTriplet = edges
+    this.weighted = true
+    this
+  }
 }
 
 object Graph {
@@ -98,38 +114,34 @@ object Graph {
     this
   }
 
-  def mapNode2Id(graph: Graph, node2id: RDD[(Long, Int)]) = {
-
-  }
-
   def active: Graph = _active
 
-  def fromFile(rawTripletPath: String=config.input): Graph = {
+  def fromFile(rawTripletPath: String = config.input): Graph = {
     _active = if (config.weighted) fromWeighted(rawTripletPath)
     else fromUnweighted(rawTripletPath)
     _active
   }
 
   private def fromUnweighted(path: String): Graph = {
-    val edgelist: RDD[(Long, Long)] = context.textFile(path, config.partitions).mapPartitions {
+    val edgelist: RDD[(Int, Int)] = context.textFile(path, config.partitions).mapPartitions {
       _.map {
         triplet: String =>
           val parts: Array[String] = triplet.split("\\s")
-          (parts.head.toLong, parts(1).toLong)
+          (parts.head.toInt, parts(1).toInt)
       }
     }
-    new Graph(config.directed).setEdgelist(edgelist)
+    new Graph(config.directed, config.partitions).setEdgelist(edgelist)
   }
 
   private def fromWeighted(path: String): Graph = {
-    val edgeTriplet: RDD[(Long, Long, Double)] = context.textFile(path, config.partitions).mapPartitions{
+    val edgeTriplet: RDD[(Int, Int, Double)] = context.textFile(path, config.partitions).mapPartitions {
       _.map {
         triplet: String =>
           val parts: Array[String] = triplet.split("\\s")
           val weight: Double = Try(parts.last.toDouble).getOrElse(1.0)
-          (parts.head.toLong, parts(1).toLong, weight)
+          (parts.head.toInt, parts(1).toInt, weight)
       }
     }
-    new Graph(config.directed).setEdgeTriplet(edgeTriplet)
+    new Graph(config.directed, config.partitions).setEdgeTriplet(edgeTriplet)
   }
 }

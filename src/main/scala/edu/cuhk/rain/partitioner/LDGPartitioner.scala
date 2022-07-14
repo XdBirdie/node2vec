@@ -2,21 +2,19 @@ package edu.cuhk.rain.partitioner
 
 import edu.cuhk.rain.graph.Graph
 import org.apache.spark.{Partitioner, SparkContext}
-import org.apache.spark.rdd.RDD
 
 import scala.collection.mutable
 
-class Partition (val id: Int){
+class Partition(val id: Int) {
+
+  val nodes = new mutable.TreeSet[Int]()
+  var capacity: Int = _
+  private var _size: Int = 0
 
   def this(id: Int, capacity: Int) {
     this(id)
     this.capacity = capacity
   }
-
-  val nodes = new mutable.TreeSet[Long]()
-  var capacity: Int = _
-
-  def size: Int = nodes.size
 
   def clear(): this.type = {
     nodes.clear()
@@ -28,19 +26,22 @@ class Partition (val id: Int){
     this
   }
 
-  def addNode(node: Long):Unit = {
+  def addNode(node: Int, cnt: Int): Unit = {
     nodes.add(node)
+    _size += cnt
   }
 
-  def calc(neighbours: Array[Long]): Double = {
+  def calc(neighbours: Array[Int]): Double = {
     var cnt = 1
     neighbours.foreach(u => if (nodes.contains(u)) cnt += 1)
-    val w: Double = 1 - (nodes.size + neighbours.length).toDouble / capacity
+    val w: Double = 1 - (size + neighbours.length).toDouble / capacity
     (if (w > 0) cnt else 1 / cnt) * w
   }
+
+  def size: Int = _size
 }
 
-class LDGPartitioner (val numPartition: Int) {
+class LDGPartitioner(val numPartition: Int) {
 
   val partitions: Array[Partition] = new Array[Partition](numPartition)
 
@@ -50,50 +51,48 @@ class LDGPartitioner (val numPartition: Int) {
 
   var context: SparkContext = _
 
+  var numNodes: Int = 0
+
   def setup(context: SparkContext): this.type = {
     this.context = context
     this
   }
 
   def partition(graph: Graph): this.type = {
-    val capacity: Int = math.ceil(graph.numEdges.toDouble / numPartition).toInt
+    val capacity: Int = {
+      math.ceil(graph.numEdges.toDouble / numPartition).toInt * 2
+    }
+    println(s"graph.numEdges = ${graph.numEdges}")
+    println(s"capacity = ${capacity}")
+
     partitions.foreach(_.setCapacity(capacity))
-    val it: Iterator[(Long, Array[Long])] = graph.toNeighbors.toLocalIterator
-    it.foreach{case (u, vs) => addNode(u, vs)}
+    val it: Iterator[(Int, Array[Int])] = graph.toNeighbors.toLocalIterator
+    it.foreach { case (u, vs) => addNode(u, vs); numNodes += 1 }
     this
   }
 
-  def addNode(u: Long, vs: Array[Long]): Unit = {
-    partitions.maxBy(_.calc(vs)).addNode(u)
-
-//    var maxw: Double = Double.MinValue
-//    var ind = 0
-//    for (i <- 0 until numPartition) {
-//      val w: Double = partitions(i).calc(vs)
-//      if (w > maxw) {
-//        maxw = w
-//        ind = i
-//      }
-//    }
-//    partitions(ind).addNode(u)
+  def addNode(u: Int, vs: Array[Int]): Unit = {
+    partitions.maxBy(_.calc(vs)).addNode(u, vs.length)
   }
 
-  def node2partition: Map[Long, Int] = {
+  def node2partition: Map[Int, Int] = {
     partitions.foreach(x => println(x.size))
-    partitions.zipWithIndex.flatMap{case (partition, id) =>
+    partitions.zipWithIndex.flatMap { case (partition, id) =>
       partition.nodes.map((_, id))
     }.toMap
   }
 
-  def node2id: Array[(Long, Long)] = {
+  def node2id: Array[(Int, Int)] = {
     var id = 0
-    partitions.flatMap(_.nodes.map{node =>
-        val res: (Long, Long) = (node, id)
-        id += 1
-        res
-      }
+    partitions.flatMap(_.nodes.map { node =>
+      val res: (Int, Int) = (node, id)
+      id += 1
+      res
+    }
     )
   }
+
+  def partitioner: Partitioner = new IndexPartitioner(thresholds)
 
   def thresholds: Array[Int] = {
     val a = new Array[Int](numPartition)
@@ -104,8 +103,6 @@ class LDGPartitioner (val numPartition: Int) {
     }
     a
   }
-
-  def partitioner: Partitioner = new IndexPartitioner(thresholds)
 
 
 }

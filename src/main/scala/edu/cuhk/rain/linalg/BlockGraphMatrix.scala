@@ -42,9 +42,9 @@ class GridPartitioner(
   require(rowsPerPart > 0)
   require(colsPerPart > 0)
 
+  override val numPartitions: Int = rowPartitions * colPartitions
   private val rowPartitions: Int = math.ceil(rows * 1.0 / rowsPerPart).toInt
   private val colPartitions: Int = math.ceil(cols * 1.0 / colsPerPart).toInt
-  override val numPartitions: Int = rowPartitions * colPartitions
 
   /**
    * Returns the index of the partition the input coordinate belongs to.
@@ -125,11 +125,11 @@ object GridPartitioner {
  */
 
 class BlockGraphMatrix(
-                   val blocks: RDD[((Int, Int), Matrix)],
-                   val rowsPerBlock: Int,
-                   val colsPerBlock: Int,
-                   private var nRows: Long,
-                   private var nCols: Long) extends DistributedMatrix {
+                        val blocks: RDD[((Int, Int), Matrix)],
+                        val rowsPerBlock: Int,
+                        val colsPerBlock: Int,
+                        private var nRows: Long,
+                        private var nCols: Long) extends DistributedMatrix {
 
   private type MatrixBlock = ((Int, Int), Matrix) // ((blockRowIndex, blockColIndex), sub-matrix)
   /** Block (i,j) --> Set of destination partitions */
@@ -189,6 +189,20 @@ class BlockGraphMatrix(
           dimensionMsg)
       }
     }
+  }
+
+  /** Estimates the dimensions of the matrix. */
+  private def estimateDim(): Unit = {
+    val (rows, cols) = blockInfo.map { case ((blockRowIndex, blockColIndex), (m, n)) =>
+      (blockRowIndex.toLong * rowsPerBlock + m,
+        blockColIndex.toLong * colsPerBlock + n)
+    }.reduce { (x0, x1) =>
+      (math.max(x0._1, x1._1), math.max(x0._2, x1._2))
+    }
+    if (nRows <= 0L) nRows = rows
+    assert(rows <= nRows, s"The number of rows $rows is more than claimed $nRows.")
+    if (nCols <= 0L) nCols = cols
+    assert(cols <= nCols, s"The number of columns $cols is more than claimed $nCols.")
   }
 
   /** Caches the underlying RDD. */
@@ -312,30 +326,6 @@ class BlockGraphMatrix(
     }
   }
 
-  override def numRows(): Long = {
-    if (nRows <= 0L) estimateDim()
-    nRows
-  }
-
-  override def numCols(): Long = {
-    if (nCols <= 0L) estimateDim()
-    nCols
-  }
-
-  /** Estimates the dimensions of the matrix. */
-  private def estimateDim(): Unit = {
-    val (rows, cols) = blockInfo.map { case ((blockRowIndex, blockColIndex), (m, n)) =>
-      (blockRowIndex.toLong * rowsPerBlock + m,
-        blockColIndex.toLong * colsPerBlock + n)
-    }.reduce { (x0, x1) =>
-      (math.max(x0._1, x1._1), math.max(x0._2, x1._2))
-    }
-    if (nRows <= 0L) nRows = rows
-    assert(rows <= nRows, s"The number of rows $rows is more than claimed $nRows.")
-    if (nCols <= 0L) nCols = cols
-    assert(cols <= nCols, s"The number of columns $cols is more than claimed $nCols.")
-  }
-
   def createPartitioner(): GridPartitioner =
     GridPartitioner(numRowBlocks, numColBlocks, suggestedNumPartitions = blocks.partitions.length)
 
@@ -343,7 +333,7 @@ class BlockGraphMatrix(
                 other: BlockGraphMatrix,
                 mul: (Matrix, Matrix) => Matrix,
                 add: (Matrix, Matrix) => Matrix
-              ): Unit =  {
+              ): Unit = {
     val resultPartitioner: GridPartitioner = GridPartitioner(numRowBlocks, other.numColBlocks,
       math.max(blocks.partitions.length, other.blocks.partitions.length))
     val (leftDestinations, rightDestinations) = simulateMultiply(other, resultPartitioner, 1)
@@ -372,6 +362,17 @@ class BlockGraphMatrix(
     // TODO: Try to use aggregateByKey instead of reduceByKey to get rid of intermediate matrices
     new BlockGraphMatrix(newBlocks, rowsPerBlock, other.colsPerBlock, numRows(), other.numCols())
   }
+
+  override def numRows(): Long = {
+    if (nRows <= 0L) estimateDim()
+    nRows
+  }
+
+  override def numCols(): Long = {
+    if (nCols <= 0L) estimateDim()
+    nCols
+  }
+
   /**
    * Simulate the multiplication with just block indices in order to cut costs on communication,
    * when we are actually shuffling the matrices.

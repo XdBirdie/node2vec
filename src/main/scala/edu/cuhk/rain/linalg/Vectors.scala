@@ -233,6 +233,17 @@ object Vectors {
     new DenseVector(new Array[Double](size))
   }
 
+  def parseNumeric(any: Any): Vector = {
+    any match {
+      case values: Array[Double] =>
+        Vectors.dense(values)
+      case Seq(size: Double, indices: Array[Double], values: Array[Double]) =>
+        Vectors.sparse(size.toInt, indices.map(_.toInt), values)
+      case other =>
+        throw new SparkException(s"Cannot parse $other.")
+    }
+  }
+
   /**
    * Creates a dense vector from a double array.
    */
@@ -247,17 +258,6 @@ object Vectors {
    */
   def sparse(size: Int, indices: Array[Int], values: Array[Double]): Vector =
     new SparseVector(size, indices, values)
-
-  def parseNumeric(any: Any): Vector = {
-    any match {
-      case values: Array[Double] =>
-        Vectors.dense(values)
-      case Seq(size: Double, indices: Array[Double], values: Array[Double]) =>
-        Vectors.sparse(size.toInt, indices.map(_.toInt), values)
-      case other =>
-        throw new SparkException(s"Cannot parse $other.")
-    }
-  }
 
   /**
    * Creates a vector instance from a breeze vector.
@@ -486,6 +486,8 @@ class DenseVector(val values: Array[Double]) extends Vector {
     result
   }
 
+  override def size: Int = values.length
+
   override def numActives: Int = size
 
   override def numNonzeros: Int = {
@@ -512,8 +514,6 @@ class DenseVector(val values: Array[Double]) extends Vector {
     }
     new SparseVector(size, ii, vv)
   }
-
-  override def size: Int = values.length
 
   override def foreachActive(f: (Int, Double) => Unit): Unit = {
     var i = 0

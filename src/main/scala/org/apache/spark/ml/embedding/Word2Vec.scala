@@ -38,113 +38,114 @@ private[embedding] trait Word2VecBase extends Params
   /**
    * The dimension of the code that you want to transform from words.
    * Default: 100
+   *
    * @group param
    */
   final val vectorSize = new IntParam(
     this, "vectorSize", "the dimension of codes after transforming from words (> 0)",
     ParamValidators.gt(0))
   setDefault(vectorSize -> 100)
-
-  /** @group getParam */
-  def getVectorSize: Int = $(vectorSize)
-
   /**
    * The window size (context words from [-window, window]).
    * Default: 5
+   *
    * @group expertParam
    */
   final val windowSize = new IntParam(
     this, "windowSize", "the window size (context words from [-window, window]) (> 0)",
     ParamValidators.gt(0))
-  setDefault(windowSize -> 5)
-
-  /** @group expertGetParam */
-  def getWindowSize: Int = $(windowSize)
-
   /**
    * Number of partitions for sentences of words.
    * Default: 1
+   *
    * @group param
    */
   final val numPartitions = new IntParam(
     this, "numPartitions", "number of partitions for sentences of words (> 0)",
     ParamValidators.gt(0))
-  setDefault(numPartitions -> 1)
-
-  /** @group getParam */
-  def getNumPartitions: Int = $(numPartitions)
-
+  setDefault(windowSize -> 5)
   /**
    * The minimum number of times a token must appear to be included in the word2vec model's
    * vocabulary.
    * Default: 5
+   *
    * @group param
    */
   final val minCount = new IntParam(this, "minCount", "the minimum number of times a token must " +
     "appear to be included in the word2vec model's vocabulary (>= 0)", ParamValidators.gtEq(0))
-  setDefault(minCount -> 5)
-
-  /** @group getParam */
-  def getMinCount: Int = $(minCount)
-
   /**
    * Sets the maximum length (in words) of each sentence in the input data.
    * Any sentence longer than this threshold will be divided into chunks of
    * up to `maxSentenceLength` size.
    * Default: 1000
+   *
    * @group param
    */
   final val maxSentenceLength = new IntParam(this, "maxSentenceLength", "Maximum length " +
     "(in words) of each sentence in the input data. Any sentence longer than this threshold will " +
     "be divided into chunks up to the size (> 0)", ParamValidators.gt(0))
+  setDefault(numPartitions -> 1)
+  /**
+   * Use continues bag-of-words model.
+   * Default: 0
+   *
+   * @group param
+   */
+  final val cbow = new IntParam(this, "cbow", "Use continues bag-of-words model",
+    ParamValidators.inArray(Array(0, 1)))
+  /**
+   * Use hierarchical softmax method to train the model.
+   * Default: 1
+   *
+   * @group param
+   */
+  final val hs = new IntParam(this, "hs", "Use hierarchical softmax method to train the model",
+    ParamValidators.inArray(Array(0, 1)))
+  setDefault(minCount -> 5)
+  /**
+   * Use negative sampling method to train the model.
+   * Default: 0
+   *
+   * @group param
+   */
+  final val negative = new IntParam(this, "negative", "Use negative sampling method to train the model",
+    ParamValidators.inArray(Array(0, 1)))
+  /**
+   * Use sub-sampling trick to improve the performance.
+   * Default: 0
+   *
+   * @group param
+   */
+  final val sample = new DoubleParam(this, "sample", "Use sub-sampling trick to improve the performance",
+    ParamValidators.inRange(0, 1, true, true))
   setDefault(maxSentenceLength -> 1000)
+
+  /** @group getParam */
+  def getVectorSize: Int = $(vectorSize)
+
+  /** @group expertGetParam */
+  def getWindowSize: Int = $(windowSize)
+  setDefault(cbow -> 0)
+
+  /** @group getParam */
+  def getNumPartitions: Int = $(numPartitions)
+
+  /** @group getParam */
+  def getMinCount: Int = $(minCount)
+  setDefault(hs -> 1)
 
   /** @group getParam */
   def getMaxSentenceLength: Int = $(maxSentenceLength)
 
-  /**
-    * Use continues bag-of-words model.
-    * Default: 0
-    * @group param
-    */
-  final val cbow = new IntParam(this, "cbow", "Use continues bag-of-words model",
-    ParamValidators.inArray(Array(0, 1)))
-  setDefault(cbow -> 0)
-
   /** @group getParam */
   def getCBOW: Int = $(cbow)
-
-  /**
-    * Use hierarchical softmax method to train the model.
-    * Default: 1
-    * @group param
-    */
-  final val hs = new IntParam(this, "hs", "Use hierarchical softmax method to train the model",
-    ParamValidators.inArray(Array(0, 1)))
-  setDefault(hs -> 1)
+  setDefault(negative -> 0)
 
   /** @group getParam */
   def getHS: Int = $(hs)
 
-  /**
-    * Use negative sampling method to train the model.
-    * Default: 0
-    * @group param
-    */
-  final val negative = new IntParam(this, "negative", "Use negative sampling method to train the model",
-    ParamValidators.inArray(Array(0, 1)))
-  setDefault(negative -> 0)
-
   /** @group getParam */
   def getNegative: Int = $(negative)
-
-  /**
-    * Use sub-sampling trick to improve the performance.
-    * Default: 0
-    * @group param
-    */
-  final val sample = new DoubleParam(this, "sample", "Use sub-sampling trick to improve the performance",
-    ParamValidators.inRange(0, 1, true, true))
   setDefault(sample -> 0)
 
   /** @group getParam */
@@ -167,7 +168,7 @@ private[embedding] trait Word2VecBase extends Params
  * Word2Vec trains a model of `Map(String, Vector)`, i.e. transforms a word into a code for further
  * natural language processing or machine learning process.
  */
-final class Word2Vec (override val uid: String)
+final class Word2Vec(override val uid: String)
   extends Estimator[Word2VecModel] with Word2VecBase with DefaultParamsWritable {
 
   def this() = this(Identifiable.randomUID("w2v"))
@@ -249,9 +250,9 @@ object Word2Vec extends DefaultParamsReadable[Word2Vec] {
 /**
  * Model fitted by [[Word2Vec]].
  */
-class Word2VecModel private[ml] (
-    override val uid: String,
-    @transient private val wordVectors: embedding.Word2VecModel)
+class Word2VecModel private[ml](
+                                 override val uid: String,
+                                 @transient private val wordVectors: embedding.Word2VecModel)
   extends Model[Word2VecModel] with Word2VecBase with MLWritable {
 
   import Word2VecModel._
@@ -335,10 +336,12 @@ class Word2VecModel private[ml] (
 
 object Word2VecModel extends MLReadable[Word2VecModel] {
 
+  override def read: MLReader[Word2VecModel] = new Word2VecModelReader
+
+  override def load(path: String): Word2VecModel = super.load(path)
+
   private[Word2VecModel]
   class Word2VecModelWriter(instance: Word2VecModel) extends MLWriter {
-
-    private case class Data(wordIndex: Map[String, Int], wordVectors: Seq[Float])
 
     override protected def saveImpl(path: String): Unit = {
       DefaultParamsWriter.saveMetadata(instance, path, sc)
@@ -346,6 +349,8 @@ object Word2VecModel extends MLReadable[Word2VecModel] {
       val dataPath = new Path(path, "data").toString
       sparkSession.createDataFrame(Seq(data)).repartition(1).write.parquet(dataPath)
     }
+
+    private case class Data(wordIndex: Map[String, Int], wordVectors: Seq[Float])
   }
 
   private class Word2VecModelReader extends MLReader[Word2VecModel] {
@@ -366,8 +371,4 @@ object Word2VecModel extends MLReadable[Word2VecModel] {
       model
     }
   }
-
-  override def read: MLReader[Word2VecModel] = new Word2VecModelReader
-
-  override def load(path: String): Word2VecModel = super.load(path)
 }

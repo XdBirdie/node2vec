@@ -4,41 +4,7 @@ import scopt.OptionParser
 
 
 case object ParamsPaser {
-  object Command extends Enumeration {
-    type Command = Value
-    val node2vec, randomwalk, embedding, linkPredict, partition = Value
-  }
-  object Version extends Enumeration {
-    type Version = Value
-    val baseline, partition, broadcast, join2, one = Value
-  }
-  import Command._
-
-  case class Params(// node2vec参数
-                    iter: Int = 10,
-                    lr: Double = 0.025,
-                    dim: Int = 128,
-                    window: Int = 10,
-                    minCount: Int = 0,
-                   // rw参数
-                    walkLength: Int = 80,
-                    numWalks: Int = 10,
-                    p: Double = 1.0,
-                    q: Double = 1.0,
-                   // graph参数
-                    weighted: Boolean = true,
-                    directed: Boolean = false,
-                    indexed: Boolean = true,
-                   // 输入/输出参数
-                    nodePath: String = null,
-                    input: String = null,
-                    output: String = null,
-
-                    partitions: Int = 10,
-                    cmd: Command = Command.node2vec
-                   ) extends Serializable
   val defaultParams: Params = Params()
-
   val parser: OptionParser[Params] = new OptionParser[Params]("node2vec") {
     head("Node2vec Spark")
     opt[Int]("iter")
@@ -106,10 +72,47 @@ case object ParamsPaser {
 
     opt[Int]("partitions")
       .text(s"partitions: ${defaultParams.partitions}")
-      .action((x: Int, c: Params) => c.copy(partitions=x))
+      .action((x: Int, c: Params) => c.copy(partitions = x))
   }
+
+  object Command extends Enumeration {
+    type Command = Value
+    val node2vec, randomwalk, embedding, linkPredict, partition = Value
+  }
+
+  object Version extends Enumeration {
+    type Version = Value
+    val baseline, partition, broadcast, join2, one = Value
+  }
+
+  import Command._
 
   def parse(args: Array[String]): Option[Params] = {
     parser.parse(args, defaultParams)
   }
+
+  case class Params( // node2vec参数
+                     iter: Int = 10,
+                     lr: Double = 0.025,
+                     dim: Int = 128,
+                     window: Int = 10,
+                     minCount: Int = 0,
+                     // rw参数
+                     walkLength: Int = 80,
+                     numWalks: Int = 10,
+                     p: Double = 1.0,
+                     q: Double = 1.0,
+                     // graph参数
+                     weighted: Boolean = true,
+                     directed: Boolean = false,
+                     indexed: Boolean = true,
+                     // 输入/输出参数
+                     nodePath: String = null,
+                     input: String = null,
+                     output: String = null,
+
+                     partitions: Int = 10,
+                     cmd: Command = Command.node2vec
+                   ) extends Serializable
+
 }

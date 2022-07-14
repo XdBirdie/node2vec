@@ -457,6 +457,8 @@ class SparseMatrix(
     case _ => false
   }
 
+  override def hashCode(): Int = asBreeze.hashCode
+
   def asBreeze: BM[Double] = {
     if (!isTransposed) {
       new BSM[Double](values, numRows, numCols, colPtrs, rowIndices)
@@ -466,11 +468,19 @@ class SparseMatrix(
     }
   }
 
-  override def hashCode(): Int = asBreeze.hashCode
-
   override def apply(i: Int, j: Int): Double = {
     val ind = index(i, j)
     if (ind < 0) 0.0 else values(ind)
+  }
+
+  def index(i: Int, j: Int): Int = {
+    require(i >= 0 && i < numRows, s"Expected 0 <= i < $numRows, got i = $i.")
+    require(j >= 0 && j < numCols, s"Expected 0 <= j < $numCols, got j = $j.")
+    if (!isTransposed) {
+      Arrays.binarySearch(rowIndices, colPtrs(j), colPtrs(j + 1), i)
+    } else {
+      Arrays.binarySearch(rowIndices, colPtrs(i), colPtrs(i + 1), j)
+    }
   }
 
   override def copy: SparseMatrix = {
@@ -557,16 +567,6 @@ class SparseMatrix(
         "value. Only non-zero elements in Sparse Matrices can be updated.")
     } else {
       values(ind) = v
-    }
-  }
-
-  def index(i: Int, j: Int): Int = {
-    require(i >= 0 && i < numRows, s"Expected 0 <= i < $numRows, got i = $i.")
-    require(j >= 0 && j < numCols, s"Expected 0 <= j < $numCols, got j = $j.")
-    if (!isTransposed) {
-      Arrays.binarySearch(rowIndices, colPtrs(j), colPtrs(j + 1), i)
-    } else {
-      Arrays.binarySearch(rowIndices, colPtrs(i), colPtrs(i + 1), j)
     }
   }
 

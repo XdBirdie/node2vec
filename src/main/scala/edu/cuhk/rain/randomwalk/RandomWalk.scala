@@ -15,7 +15,7 @@ case object RandomWalk {
   }
 
   def randomWalk(graph: DistributedSparseMatrix): this.type = {
-    
+
     this
   }
 
