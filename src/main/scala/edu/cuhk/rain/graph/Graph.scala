@@ -1,5 +1,6 @@
 package edu.cuhk.rain.graph
 
+import edu.cuhk.rain.distributed.DistributedSparseMatrix
 import edu.cuhk.rain.util.ParamsPaser.Params
 import org.apache.spark.SparkContext
 import org.apache.spark.broadcast.Broadcast
@@ -31,6 +32,10 @@ class Graph private(
   private var edgeTriplet: RDD[(Long, Long, Double)] = _
   private var edgelist: RDD[(Long, Long)] = _
 
+  lazy val numEdges: Long =
+    if (this.weighted) toEdgeTriplet.count()
+    else toEdgelist.count()
+
   lazy val toAdj: RDD[(Long, Array[(Long, Double)])] = {
     val edgeCreator: (Long, Long, Double) => Array[(Long, Array[(Long, Double)])] =
       if (directed) createDirectedEdge else createUndirectedEdge
@@ -51,6 +56,12 @@ class Graph private(
   lazy val toEdgeTriplet: RDD[(Long, Long, Double)] = {
     (if (weighted) edgeTriplet
     else edgelist.mapPartitions(it => it.map(e => (e._1, e._2, 1.0)))).cache()
+  }
+
+  lazy val toNeighbors: RDD[(Long, Array[Long])] = {
+    (if (directed) toEdgelist else toEdgelist.mapPartitions{
+      _.flatMap{case (u, v) => Array((u, v), (v, u))}
+    }).groupByKey().mapValues(_.toArray).cache()
   }
 
   def unpersist(blocking: Boolean): this.type = {
@@ -85,6 +96,10 @@ object Graph {
     this.context = context
     this.config = param
     this
+  }
+
+  def mapNode2Id(graph: Graph, node2id: RDD[(Long, Int)]) = {
+
   }
 
   def active: Graph = _active

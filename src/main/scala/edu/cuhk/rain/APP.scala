@@ -30,6 +30,7 @@ object APP {
   def main(args: Array[String]):Unit = {
     val conf: SparkConf = new SparkConf().setAppName("edu.cuhk.rain.node2vec").setMaster("local[*]")
     val context = new SparkContext(conf)
+    context.setLogLevel("warn")
 
     val params: Params = Params(
       partitions = 4,
@@ -39,8 +40,8 @@ object APP {
       cmd = Command.partition
     )
 
-//    Partitioner.setup(context, params).partition()
-    Distributed.setup(context, params).start()
+    Partitioner.setup(context, params).partition()
+//    Distributed.setup(context, params).start()
 
 //    val option: Option[Params] = parse(args)
 //    option match {

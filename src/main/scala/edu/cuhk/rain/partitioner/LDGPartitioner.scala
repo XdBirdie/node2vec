@@ -1,12 +1,32 @@
 package edu.cuhk.rain.partitioner
 
-import org.apache.spark.Partitioner
+import edu.cuhk.rain.graph.Graph
+import org.apache.spark.{Partitioner, SparkContext}
 import org.apache.spark.rdd.RDD
+
 import scala.collection.mutable
 
-class Partition (val id: Int, val capacity: Int){
+class Partition (val id: Int){
+
+  def this(id: Int, capacity: Int) {
+    this(id)
+    this.capacity = capacity
+  }
+
   val nodes = new mutable.TreeSet[Long]()
+  var capacity: Int = _
+
   def size: Int = nodes.size
+
+  def clear(): this.type = {
+    nodes.clear()
+    this
+  }
+
+  def setCapacity(capacity: Int): this.type = {
+    this.capacity = capacity
+    this
+  }
 
   def addNode(node: Long):Unit = {
     nodes.add(node)
@@ -15,31 +35,47 @@ class Partition (val id: Int, val capacity: Int){
   def calc(neighbours: Array[Long]): Double = {
     var cnt = 1
     neighbours.foreach(u => if (nodes.contains(u)) cnt += 1)
-    val w: Double =  1 - nodes.size.toDouble / capacity
-    w * cnt
+    val w: Double = 1 - (nodes.size + neighbours.length).toDouble / capacity
+    (if (w > 0) cnt else 1 / cnt) * w
   }
 }
 
-class LDGPartitioner (
-                       val numPartition: Int,
-                       val numVertex: Int) {
+class LDGPartitioner (val numPartition: Int) {
+
   val partitions: Array[Partition] = new Array[Partition](numPartition)
-  val capacity: Int = (numVertex.toDouble / numPartition).ceil.toInt
+
   for (i <- 0 until numPartition) {
-    partitions(i) = new Partition(i, capacity)
+    partitions(i) = new Partition(i)
+  }
+
+  var context: SparkContext = _
+
+  def setup(context: SparkContext): this.type = {
+    this.context = context
+    this
+  }
+
+  def partition(graph: Graph): this.type = {
+    val capacity: Int = math.ceil(graph.numEdges.toDouble / numPartition).toInt
+    partitions.foreach(_.setCapacity(capacity))
+    val it: Iterator[(Long, Array[Long])] = graph.toNeighbors.toLocalIterator
+    it.foreach{case (u, vs) => addNode(u, vs)}
+    this
   }
 
   def addNode(u: Long, vs: Array[Long]): Unit = {
-    var maxw: Double = Double.MinValue
-    var ind = 0
-    for (i <- 0 until numPartition) {
-      val w: Double = partitions(i).calc(vs)
-      if (w > maxw) {
-        maxw = w
-        ind = i
-      }
-    }
-    partitions(ind).addNode(u)
+    partitions.maxBy(_.calc(vs)).addNode(u)
+
+//    var maxw: Double = Double.MinValue
+//    var ind = 0
+//    for (i <- 0 until numPartition) {
+//      val w: Double = partitions(i).calc(vs)
+//      if (w > maxw) {
+//        maxw = w
+//        ind = i
+//      }
+//    }
+//    partitions(ind).addNode(u)
   }
 
   def node2partition: Map[Long, Int] = {

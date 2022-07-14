@@ -24,13 +24,15 @@ case object Partitioner {
   def partition(): Unit = {
     val graph: Graph = Graph.setup(context, config).fromFile()
 
-    val adj: RDD[(Long, Array[(Long, Double)])] = graph.toAdj
-    val tuples: Array[(Long, Array[Long])] = adj.mapValues(_.map(_._1)).collect()
-    val partitioner = new LDGPartitioner(config.partitions, 10312)
-    tuples.foreach{case (u, vs) => partitioner.addNode(u, vs)}
+//    val adj: RDD[(Long, Array[(Long, Double)])] = graph.toAdj
+//    val tuples: Array[(Long, Array[Long])] = adj.mapValues(_.map(_._1)).collect()
+    val partitioner = new LDGPartitioner(config.partitions)
+    partitioner.partition(graph)
+//    tuples.foreach{case (u, vs) => partitioner.addNode(u, vs)}
 
     val node2partition: Map[Long, Int] = partitioner.node2partition
     println(node2partition.size)
+    node2partition.foreach(println)
 
 //    var sum = 0
 //    tuples.foreach{case (u, vs) => vs.foreach{v =>
@@ -39,6 +41,7 @@ case object Partitioner {
 
     val bcMap: Broadcast[Map[Long, Int]] = context.broadcast(node2partition)
     val sum: LongAccumulator = context.longAccumulator("cut")
+    graph.toEdgelist.collect().foreach(println)
     graph.toEdgeTriplet.foreachPartition{ it =>
       var s = 0
       it.foreach{ case (u, v, _) =>
