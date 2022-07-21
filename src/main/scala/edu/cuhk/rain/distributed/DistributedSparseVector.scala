@@ -29,10 +29,8 @@ class DistributedSparseVector(
   def multiply(m: DistributedSparseMatrix, partitioner: Partitioner, semiring: Semiring[Double, Double]): DistributedSparseVector = {
     require(size == m.numRows())
     val res: RDD[(Int, Double)] = m.rows.join(v, partitioner).flatMap { case (_, (ov, s)) =>
-      val values: Array[(Int, Double)] = ov.multiply(s, semiring.mul_Op).values
-//      println(s"values = ${values.mkString(", ")}")
-      values
-    }.reduceByKey((x0, x1) => semiring.add_op(x0, x1))
+      ov.multiply(s, semiring.mul_Op).values
+    }.reduceByKey(partitioner, (x0, x1) => semiring.add_op(x0, x1))
 
     new DistributedSparseVector(res, m.numCols())
   }

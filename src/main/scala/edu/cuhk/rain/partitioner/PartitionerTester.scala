@@ -6,7 +6,7 @@ import org.apache.spark.SparkContext
 import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.util.LongAccumulator
 
-case object Partitioner {
+case object PartitionerTester {
   var context: SparkContext = _
   var config: Params = _
 

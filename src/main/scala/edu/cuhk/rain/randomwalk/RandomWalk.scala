@@ -39,6 +39,8 @@ case object RandomWalk extends Logging{
 
     val matrix: DistributedSparseMatrix =
       graph.toMatrix(node2id, numNodes).partitionBy(partitioner).cache()
+    matrix.count()
+
     randomWalk(matrix)
   }
 
@@ -46,18 +48,17 @@ case object RandomWalk extends Logging{
     var path: RDD[(Int, ArrayBuffer[Int])] =
       nodelist.map(u => (u, ArrayBuffer(u))).partitionBy(partitioner).cache()
     path.count()
-    //    println(s"graph.collect() = ${graph.collect()._1.mkString("Array(", ", ", ")")}")
+
     for (i <- 0 until config.walkLength) {
       logWarning(s"\t step: $i")
+
       val vector: DistributedSparseVector = DistributedSparseVector.random(numNodes, context)
-      //      println(vector.collect())
       val nextWalk: RDD[(Int, Int)] =
         vector.multiply(matrix, Semiring.semiringMaxfracPlus).v.mapValues(_.toInt)
-      //      nextWalk.collect().foreach(println)
-      val tmp: RDD[(Int, Int)] =
-        path.map {
-          case (srcId, buffer) => (buffer.last, srcId)
-        }.join(nextWalk).map{_._2}
+
+      val tmp: RDD[(Int, Int)] = path.map {
+        case (srcId, buffer) => (buffer.last, srcId)
+      }.join(nextWalk).map{_._2}
       val lastPath: RDD[(Int, ArrayBuffer[Int])] = path
       path = path.join(tmp, partitioner).mapValues{
         case (buffer, nextHop) => buffer.append(nextHop); buffer

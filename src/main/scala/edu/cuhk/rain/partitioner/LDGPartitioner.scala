@@ -71,7 +71,7 @@ class LDGPartitioner(val numPartition: Int) {
     this
   }
 
-  def addNode(u: Int, vs: Array[Int]): Unit = {
+  private def addNode(u: Int, vs: Array[Int]): Unit = {
     partitions.maxBy(_.calc(vs)).addNode(u, vs.length)
   }
 
@@ -94,7 +94,7 @@ class LDGPartitioner(val numPartition: Int) {
 
   def partitioner: Partitioner = new IndexPartitioner(thresholds)
 
-  def thresholds: Array[Int] = {
+  private def thresholds: Array[Int] = {
     val a = new Array[Int](numPartition)
     var cnt = 0
     for (i <- 0 until numPartition) {

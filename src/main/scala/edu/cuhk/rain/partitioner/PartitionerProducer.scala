@@ -7,7 +7,9 @@ import org.apache.spark.{Partitioner, SparkContext}
 trait PartitionerProducer {
   def setup(context: SparkContext): this.type
 
-  def partition(graph: Graph): Partitioner
+  def partition(graph: Graph): this.type
+
+  def partitioner: Partitioner
 
   def node2id: RDD[(Long, Int)]
 

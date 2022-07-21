@@ -24,9 +24,3 @@ case object BinaryOp {
   lazy val binaryFirst = new BinaryOp[Double, Double]((u, _) => u)
   lazy val binarySecond = new BinaryOp[Double, Double]((_, v) => v)
 }
-
-
-
-
-
-
