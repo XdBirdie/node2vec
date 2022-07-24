@@ -35,10 +35,10 @@ case object RandomWalk extends Logging{
     partitioner = ldg.partitioner
     numNodes = ldg.numNodes
     println(s"numNodes = ${numNodes}")
-    val node2id: Array[(Int, Int)] = ldg.node2id
+    val node2id: RDD[(Int, Int)] = ldg.node2id
 
     val matrix: DistributedSparseMatrix =
-      graph.toMatrix(node2id, numNodes).partitionBy(partitioner).cache()
+      graph.toMatrix(node2id).partitionBy(partitioner).cache()
     matrix.count()
 
     randomWalk(matrix)
@@ -88,6 +88,11 @@ case object RandomWalk extends Logging{
         tmp.unpersist()
       }
     }
+    this
+  }
+
+  def save(): this.type = {
+
     this
   }
 

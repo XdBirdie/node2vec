@@ -21,11 +21,16 @@ case object PartitionerTester extends Logging{
 
   def partition(graph: Graph): this.type = {
     logWarning("begin partition")
-    val partitioner: LPTPartitioner =
+    val producer: PartitionerProducer =
       new LPTPartitioner(config.partitions).partition(graph)
     logWarning("end partition")
 
-    val node2partition: Map[Int, Int] = partitioner.node2partition
+//    println(s"producer.partitions = ${producer.partitions.mkString("\n")}")
+    println(s"producer.partitioner = ${producer.partitioner}")
+
+    val node2partition: Map[Int, Int] = producer.node2partition
+    println(s"node2partition = ${node2partition}")
+    
     val bcMap: Broadcast[Map[Int, Int]] = context.broadcast(node2partition)
     val sum: LongAccumulator = context.longAccumulator("cut")
 

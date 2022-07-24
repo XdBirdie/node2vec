@@ -12,7 +12,7 @@ object APP extends Logging{
     val conf: SparkConf = new SparkConf().setAppName("edu.cuhk.rain.node2vec").setMaster("local[*]")
     val context = new SparkContext(conf)
     context.setLogLevel("warn")
-    context.setCheckpointDir("hdfs://~/checkpoint/")
+//    context.setCheckpointDir("hdfs://~/checkpoint/")
 
     params.cmd match {
       case Command.node2vec =>
@@ -29,7 +29,7 @@ object APP extends Logging{
       partitions = 4,
       weighted = false,
       directed = false,
-      //      input = "./data/karate.edgelist",
+//      input = "./data/karate.edgelist",
       input = "./data/BlogCatalog",
       walkLength = 20,
       numWalks = 5,
@@ -39,9 +39,10 @@ object APP extends Logging{
   }
 
   def main(args: Array[String]): Unit = {
-    ParamsPaser.parse(args) match {
-      case Some(x) => start(x)
-      case _ => logError("error params!")
-    }
+    test()
+//    ParamsPaser.parse(args) match {
+//      case Some(x) => start(x)
+//      case _ => logError("error params!")
+//    }
   }
 }

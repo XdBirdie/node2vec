@@ -1,34 +1,15 @@
 package edu.cuhk.rain.partitioner
 
 import edu.cuhk.rain.graph.Graph
+import org.apache.spark.rdd.RDD
 import org.apache.spark.{Partitioner, SparkContext}
 
-import scala.collection.mutable.ArrayBuffer
+class LPTPartitioner (val numPartition: Int) extends PartitionerProducer {
+  val partitions: Array[LPTPartition] = Array.tabulate(numPartition)(_ => LPTPartition())
+  private var _numNodes: Int = 0
 
-class LPTPartitioner (val numPartition: Int) {
-
-  class Partition {
-    val nodes = new ArrayBuffer[Int]
-    var size = 0
-
-    def calc(n: Int): Int = n + size
-
-    def addNode(node: Int, cnt: Int): Unit = {
-      nodes.append(node)
-      size += cnt
-    }
-  }
-
-  val partitions: Array[Partition] = new Array[Partition](numPartition)
-  for (i <- 0 until numPartition) {
-    partitions(i) = new Partition
-  }
-
-  var context: SparkContext = _
-  var numNodes: Int = 0
-
-  def setup(context: SparkContext): this.type = {
-    this.context = context
+  override def setup(context: SparkContext): this.type = {
+    super.setup(context)
     this
   }
 
@@ -40,39 +21,33 @@ class LPTPartitioner (val numPartition: Int) {
         _._2, ascending = false
       ).toLocalIterator
 
-    it.foreach { case (u, vs) => addNode(u, vs); numNodes += 1 }
+    it.foreach { case (u, vs) => addNode(u, vs); _numNodes += 1 }
     this
   }
 
-  private def addNode(u: Int, num: Int): Unit = {
+  private def addNode(u: Int, num: Int): Unit =
     partitions.minBy(_.calc(num)).addNode(u, num)
-  }
 
-  def node2partition: Map[Int, Int] = {
-    partitions.zipWithIndex.flatMap { case (partition, id) =>
-      partition.nodes.map((_, id))
-    }.toMap
-  }
+  def node2id: RDD[(Int, Int)] = node2id[LPTPartition](partitions, thresholds, numPartition)
 
-  def node2id: Array[(Int, Int)] = {
-    var id = 0
+  override def numNodes: Int = _numNodes
 
-    partitions.flatMap(_.nodes.map { node =>
-      val res: (Int, Int) = (node, id)
-      id += 1
-      res
-    })
-  }
+  lazy val partitioner: Partitioner = new IndexPartitioner(thresholds)
 
-  def partitioner: Partitioner = new IndexPartitioner(thresholds)
-
-  private def thresholds: Array[Int] = {
+  private lazy val thresholds: Array[Int] = {
     val a = new Array[Int](numPartition)
     var cnt = 0
     for (i <- 0 until numPartition) {
       a(i) = cnt
-      cnt += partitions(i).size
+      cnt += partitions(i).numNodes
     }
     a
+  }
+
+  override def node2partition: Map[Int, Int] = {
+    partitions.flatMap{partition =>
+      val id: Int = partition.id
+      partition.mapNodes((_, id))
+    }.toMap
   }
 }

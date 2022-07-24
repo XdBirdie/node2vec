@@ -97,7 +97,7 @@ class DistributedSparseVector(
     val res: RDD[(Int, Double)] = v.fullOuterJoin(
       other.v, coPartitioner(other)
     ).mapValues { case (x, mask) =>
-      if (mask.isEmpty ^ positive) None
+      if (mask.isEmpty ^ bcPositive.value) None
       else x
     }.filter(_._2.isDefined).mapValues(_.get)
     new DistributedSparseVector(res, size)

@@ -13,4 +13,7 @@ class IndexPartitioner(val thresholds: Array[Int]) extends Partitioner {
     require(key.isInstanceOf[Int])
     lowerBound(thresholds, key.asInstanceOf[Int])
   }
+
+  override def toString: String =
+    s"IndexPartitioner: [${thresholds.mkString(", ")}]"
 }
