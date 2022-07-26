@@ -105,11 +105,14 @@ case object RandomWalk extends Logging {
   }
 
   def save(): this.type = {
-    walkPaths.mapPartitions {
-      _.map { case (_, pathBuffer) =>
-        Try(pathBuffer.mkString(" ")).getOrElse(null)
-      }.filter{_ != null}
-    }.repartition(config.partitions).saveAsTextFile(config.output)
+    val outputPath: String = config.output
+    if (outputPath != null && outputPath.nonEmpty) {
+      walkPaths.mapPartitions {
+        _.map { case (_, pathBuffer) =>
+          Try(pathBuffer.mkString(" ")).getOrElse(null)
+        }.filter{_ != null}
+      }.repartition(config.partitions).saveAsTextFile(outputPath)
+    }
     this
   }
 

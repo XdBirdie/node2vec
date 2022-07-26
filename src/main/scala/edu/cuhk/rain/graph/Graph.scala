@@ -18,7 +18,7 @@ class Graph private(
     else toEdgelist.count()
 
   lazy val nodelist: RDD[Int] = {
-    toEdgelist.flatMap{case (u, v) => Array(u, v)}.distinct(numPartitions)
+    toEdgelist.flatMap{case (u, v) => Array(u, v)}.distinct(numPartitions).cache()
   }
 
   lazy val toAdj: RDD[(Int, Array[(Int, Double)])] = {

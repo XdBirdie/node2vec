@@ -20,8 +20,11 @@ case object PartitionerTester extends Logging{
   def partition(graph: Graph): this.type = {
     logWarning("begin partition")
     val producer: PartitionerProducer =
-      new LPTPartitioner(config.partitions, context).partition(graph)
+      new LDGPartitioner(config.partitions, context).partition(graph)
     logWarning("end partition")
+
+    val msg: String = producer.node2id.collect().mkString(", ")
+    logWarning(s"node2id: $msg")
 
     logWarning(s"producer.partitioner = ${producer.partitioner}")
 

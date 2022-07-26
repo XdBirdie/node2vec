@@ -3,19 +3,19 @@ package edu.cuhk.rain.linkPredict
 import edu.cuhk.rain.util.ParamsPaser.Params
 import org.apache.spark.SparkContext
 import org.apache.spark.broadcast.Broadcast
+import org.apache.spark.internal.Logging
 import org.slf4j.{Logger, LoggerFactory}
 
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
 import scala.util.Random
 
-case object LinkPredict {
+case object LinkPredict extends Logging{
   var sc: SparkContext = _
   var embeddingPath = ""
   var edgeListPath = ""
   var numPartition = 64
   var directed = false
-  var logger: Logger = LoggerFactory.getLogger(LinkPredict.getClass)
 
   def negSampleByPair(edgeList: Array[(Long, Long)], nodeList: Array[Long], ratio: Double): Array[(Long, Long)] = {
     val edgeSet: Set[(Long, Long)] = edgeList.toSet
@@ -46,7 +46,7 @@ case object LinkPredict {
     val posNum: Long = dataset.count(_._2 > 0)
     val negNum: Long = totalNum - posNum
 
-    logger.warn(s"posNum: $posNum, negNum: $negNum, product: ${posNum.toLong * negNum}")
+    logWarning(s"posNum: $posNum, negNum: $negNum, product: ${posNum.toLong * negNum}")
     var negSum: Long = 0
     var posGTNeg: Long = 0
     dataset.sortBy(_._1).foreach { case (_, label) =>
@@ -54,12 +54,12 @@ case object LinkPredict {
       else negSum += 1
     }
 
-    logger.warn(s"negSum: $negSum, posGTNeg: $posGTNeg")
+    logWarning(s"negSum: $negSum, posGTNeg: $posGTNeg")
     posGTNeg.toDouble / posNum.toDouble / negNum.toDouble
   }
 
   def run(): Unit = {
-    logger.warn("run!")
+    logWarning("run!")
     val directedBC: Broadcast[Boolean] = sc.broadcast(directed)
 
     val embedding: Array[(Long, Array[Double])] = sc.textFile(embeddingPath, numPartition).mapPartitions {
@@ -70,7 +70,7 @@ case object LinkPredict {
         (key, value)
       }
     }.collect()
-    logger.warn(s"collect embedding over! size: ${embedding.length}")
+    logWarning(s"collect embedding over! size: ${embedding.length}")
 
     val edgeList: Array[(Long, Long)] = sc.textFile(edgeListPath, numPartition).mapPartitions {
       (_: Iterator[String]).flatMap { line: String =>
@@ -81,27 +81,27 @@ case object LinkPredict {
         else Array((u, v), (v, u))
       }
     }.collect()
-    logger.warn("collect edge list over!")
+    logWarning("collect edge list over!")
 
     val nodeList: Array[Long] = getNodeList(edgeList)
-    logger.warn("calculate node list over!")
+    logWarning("calculate node list over!")
 
     val negativeEdge: Array[(Long, Long)] = negativeSample(edgeList, nodeList, 1)
-    logger.warn(s"negative edge get! \nneg size: ${negativeEdge.length}, edge size: ${edgeList.length}")
+    logWarning(s"negative edge get! \nneg size: ${negativeEdge.length}, edge size: ${edgeList.length}")
 
     val posSamples: Array[Double] = edgeEmbedding(edgeList, embedding)
     val negSamples: Array[Double] = edgeEmbedding(negativeEdge, embedding)
     val scores: Array[Double] = posSamples ++ negSamples
     val truths: Array[Int] = Array.fill(posSamples.length)(1) ++ Array.fill(negSamples.length)(0)
-    logger.warn(s"scores get! size: ${scores.length}")
-    logger.warn(s"Area under ROC 2 = ${calAUC2(scores.zip(truths))}")
+    logWarning(s"scores get! size: ${scores.length}")
+    logWarning(s"Area under ROC 2 = ${calAUC2(scores.zip(truths))}")
   }
 
   def negativeSample(edgeList: Array[(Long, Long)], nodeList: Array[Long], ratio: Double): Array[(Long, Long)] = {
-    logger.warn("begin negative sample!")
+    logWarning("begin negative sample!")
     val graph: Map[Long, ArrayBuffer[Long]] = nodeList.map((_: Long, ArrayBuffer[Long]())).toMap
     edgeList.foreach { case (u, v) => graph(u).append(v) }
-    logger.warn("calculate graph over!")
+    logWarning("calculate graph over!")
     val nodesNum: Int = nodeList.length
     var cnt = 0
     val samples: Map[Long, Array[Long]] = graph.map { case (u, neighbors) =>
@@ -112,11 +112,11 @@ case object LinkPredict {
       samples = samples.distinct.diff(neighbors).distinct.take(n)
       cnt += 1
       if (cnt % 100000 == 0) {
-        logger.warn(s"$cnt: ($u, ${neighbors.length}, ${n}, ${samples.length}\n[${neighbors.mkString(", ")}]\n[${samples.mkString(", ")}])")
+        logWarning(s"$cnt: ($u, ${neighbors.length}, ${n}, ${samples.length}\n[${neighbors.mkString(", ")}]\n[${samples.mkString(", ")}])")
       }
       (u, samples)
     }
-    logger.warn("sample over!")
+    logWarning("sample over!")
     samples.flatMap { case (u, vs) => vs.map((u, _: Long)) }.toArray
   }
 

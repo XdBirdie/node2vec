@@ -31,23 +31,23 @@ object APP extends Logging{
       partitions = 4,
       weighted = false,
       directed = false,
-//      input = "./data/karate.edgelist",
-      input = "./data/BlogCatalog",
+      input = "./data/karate.edgelist",
+//      input = "./data/BlogCatalog",
       walkLength = 20,
       numWalks = 5,
-      cmd = Command.randomwalk
+      cmd = Command.partition
     )
     logWarning(params.toString)
     start(params)
   }
 
   def main(args: Array[String]): Unit = {
-//    test()
-    ParamsPaser.parse(args) match {
-      case Some(x) =>
-        logWarning(x.toString)
-        start(x)
-      case _ => logError("error params!")
-    }
+    test()
+//    ParamsPaser.parse(args) match {
+//      case Some(x) =>
+//        logWarning(x.toString)
+//        start(x)
+//      case _ => logError("error params!")
+//    }
   }
 }
