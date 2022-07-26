@@ -3,19 +3,21 @@ package edu.cuhk.rain.randomwalk
 import edu.cuhk.rain.distributed.{DistributedSparseMatrix, DistributedSparseVector}
 import edu.cuhk.rain.graph.Graph
 import edu.cuhk.rain.graphBLAS.Semiring
-import edu.cuhk.rain.partitioner.LDGPartitioner
-import edu.cuhk.rain.util.ParamsPaser.{Params, parse}
+import edu.cuhk.rain.partitioner.{LDGPartitioner, LPTPartitioner, PartitionerProducer}
+import edu.cuhk.rain.util.ParamsPaser.{Params, PartitionerVersion}
 import org.apache.spark.internal.Logging
 import org.apache.spark.rdd.RDD
 import org.apache.spark.{Partitioner, SparkContext}
 
 import scala.collection.mutable.ArrayBuffer
+import scala.util.Try
 
-case object RandomWalk extends Logging{
+case object RandomWalk extends Logging {
   private var context: SparkContext = _
   private var config: Params = _
+  private var producer: PartitionerProducer = _
 
-  private var walkPath: RDD[(Int, Array[Int])] = _
+  private var walkPaths: RDD[(Int, Array[Int])] = _
 
   private var partitioner: Partitioner = _
   private var nodelist: RDD[Int] = _
@@ -24,29 +26,38 @@ case object RandomWalk extends Logging{
   def setup(context: SparkContext, param: Params): this.type = {
     this.context = context
     this.config = param
+    this.producer = param.partitioner match {
+      case PartitionerVersion.ldg =>
+        new LDGPartitioner(config.partitions, context)
+      case PartitionerVersion.lpt =>
+        new LPTPartitioner(config.partitions, context)
+    }
     this
   }
 
-  def start(): this.type = {
-    val graph: Graph = Graph.setup(context, config).fromFile()
-    nodelist = graph.nodelist.cache()
+  def start(graph: Graph): this.type = {
+    this.producer.partition(graph)
+    this.partitioner = producer.partitioner
+    logWarning(s"producer.partitioner = $partitioner")
 
-    val ldg: LDGPartitioner = new LDGPartitioner(config.partitions).partition(graph)
-    partitioner = ldg.partitioner
-    numNodes = ldg.numNodes
-    println(s"numNodes = ${numNodes}")
-    val node2id: RDD[(Int, Int)] = ldg.node2id
-
+    this.numNodes = producer.numNodes
     val matrix: DistributedSparseMatrix =
-      graph.toMatrix(node2id).partitionBy(partitioner).cache()
+      graph.toMatrix(producer.node2id, numNodes).partitionBy(partitioner).cache()
     matrix.count()
 
+    this.nodelist = context.makeRDD(
+      Array.range(0, numNodes),
+      config.partitions
+    ).cache()
     randomWalk(matrix)
+    nodelist.unpersist(false)
+    this
   }
 
-  def oneWalk(matrix: DistributedSparseMatrix): RDD[(Int, Array[Int])] = {
-    var path: RDD[(Int, ArrayBuffer[Int])] =
-      nodelist.map(u => (u, ArrayBuffer(u))).partitionBy(partitioner).cache()
+  private def oneWalk(matrix: DistributedSparseMatrix): RDD[(Int, Array[Int])] = {
+    var path: RDD[(Int, ArrayBuffer[Int])] = nodelist.map(
+      u => (u, ArrayBuffer(u))
+    ).partitionBy(partitioner).cache()
     path.count()
 
     for (i <- 0 until config.walkLength) {
@@ -59,45 +70,51 @@ case object RandomWalk extends Logging{
       val tmp: RDD[(Int, Int)] = path.map {
         case (srcId, buffer) => (buffer.last, srcId)
       }.join(nextWalk).map{_._2}
+
       val lastPath: RDD[(Int, ArrayBuffer[Int])] = path
       path = path.join(tmp, partitioner).mapValues{
-        case (buffer, nextHop) => buffer.append(nextHop); buffer
+        case (buffer, nextHop) => buffer += nextHop; buffer
       }.cache()
       path.count()
-      lastPath.unpersist()
+      lastPath.unpersist(false)
     }
+
     val lastPath: RDD[(Int, ArrayBuffer[Int])] = path
     val resPath: RDD[(Int, Array[Int])] = path.mapValues(_.toArray).cache()
     resPath.count()
-    lastPath.unpersist()
+    lastPath.unpersist(false)
     resPath
   }
 
-  def randomWalk(matrix: DistributedSparseMatrix): this.type = {
+  private def randomWalk(matrix: DistributedSparseMatrix): this.type = {
     logWarning("start randomWalk")
     for (i <- 0 until config.numWalks) {
       logWarning(s"walks: $i")
       val onePath: RDD[(Int, Array[Int])] = oneWalk(matrix)
-      if (walkPath == null) {
-        walkPath = onePath.cache()
-        walkPath.count()
+      if (walkPaths == null) {
+        walkPaths = onePath.cache()
+        walkPaths.count()
       } else {
-        val tmp: RDD[(Int, Array[Int])] = walkPath
-        walkPath = walkPath.union(onePath).cache()
-        walkPath.count()
-        tmp.unpersist()
+        val tmp: RDD[(Int, Array[Int])] = walkPaths
+        walkPaths = walkPaths.union(onePath).cache()
+        walkPaths.count()
+        tmp.unpersist(false)
       }
     }
     this
   }
 
   def save(): this.type = {
-
+    walkPaths.mapPartitions {
+      _.map { case (_, pathBuffer) =>
+        Try(pathBuffer.mkString(" ")).getOrElse(null)
+      }.filter{_ != null}
+    }.repartition(config.partitions).saveAsTextFile(config.output)
     this
   }
 
   def debug(): Unit = {
-    walkPath.toLocalIterator.foreach{
+    walkPaths.toLocalIterator.foreach{
       case (u, path) => println(s"u: $u, path: [${path.mkString(", ")}]")
     }
   }

@@ -51,14 +51,14 @@ case object Distributed {
 
   def testPipeline(): Unit = {
     val graph: Graph = Graph.setup(context, config).fromFile()
-    val ldg: LDGPartitioner = new LDGPartitioner(config.partitions).partition(graph)
+    val ldg: LDGPartitioner = new LDGPartitioner(config.partitions, context).partition(graph)
     val partitioner: Partitioner = ldg.partitioner
     val numNodes: Int = ldg.numNodes
     println(s"numNodes = ${numNodes}")
     
     val node2id: RDD[(Int, Int)] = ldg.node2id
     
-    val matrix: DistributedSparseMatrix = graph.toMatrix(node2id).partitionBy(partitioner)
+    val matrix: DistributedSparseMatrix = graph.toMatrix(node2id, ldg.numNodes).partitionBy(partitioner)
     matrix.rows.count()
   }
 }

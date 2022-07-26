@@ -4,14 +4,15 @@ import edu.cuhk.rain.graph.Graph
 import org.apache.spark.rdd.RDD
 import org.apache.spark.{Partitioner, SparkContext}
 
-class LPTPartitioner (val numPartition: Int) extends PartitionerProducer {
+class LPTPartitioner (
+                       val numPartition: Int,
+                       val context: SparkContext
+                     ) extends PartitionerProducer {
+  super.setup(context)
+
   val partitions: Array[LPTPartition] = Array.tabulate(numPartition)(_ => LPTPartition())
   private var _numNodes: Int = 0
 
-  override def setup(context: SparkContext): this.type = {
-    super.setup(context)
-    this
-  }
 
   def partition(graph: Graph): this.type = {
     val it: Iterator[(Int, Int)] =
@@ -34,7 +35,7 @@ class LPTPartitioner (val numPartition: Int) extends PartitionerProducer {
 
   lazy val partitioner: Partitioner = new IndexPartitioner(thresholds)
 
-  private lazy val thresholds: Array[Int] = {
+  lazy val thresholds: Array[Int] = {
     val a = new Array[Int](numPartition)
     var cnt = 0
     for (i <- 0 until numPartition) {

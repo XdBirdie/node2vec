@@ -73,6 +73,10 @@ case object ParamsPaser {
     opt[Int]("partitions")
       .text(s"partitions: ${defaultParams.partitions}")
       .action((x: Int, c: Params) => c.copy(partitions = x))
+
+    opt[String]("partitioner")
+      .text(s"partitioner: ${defaultParams.partitioner.toString}")
+      .action((x: String, c: Params) => c.copy(partitioner = PartitionerVersion.withName(x)))
   }
 
   object Command extends Enumeration {
@@ -80,12 +84,13 @@ case object ParamsPaser {
     val node2vec, randomwalk, embedding, linkPredict, partition = Value
   }
 
-  object Version extends Enumeration {
-    type Version = Value
-    val baseline, partition, broadcast, join2, one = Value
+  object PartitionerVersion extends Enumeration {
+    type Partitioner = Value
+    val ldg, lpt = Value
   }
 
   import Command._
+  import PartitionerVersion._
 
   def parse(args: Array[String]): Option[Params] = {
     parser.parse(args, defaultParams)
@@ -112,7 +117,10 @@ case object ParamsPaser {
                      output: String = null,
 
                      partitions: Int = 10,
-                     cmd: Command = Command.node2vec
-                   ) extends Serializable
+                     cmd: Command = Command.node2vec,
+                     partitioner: Partitioner = PartitionerVersion.lpt
+                   ) extends Serializable {
+
+  }
 
 }

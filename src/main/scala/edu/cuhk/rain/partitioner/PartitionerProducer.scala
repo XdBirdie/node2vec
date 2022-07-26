@@ -9,6 +9,8 @@ import org.apache.spark.{Partitioner, SparkContext}
 import scala.reflect.ClassTag
 
 trait PartitionerProducer extends Logging with Serializable {
+  val numPartition: Int
+
   private var context: SparkContext = _
 
   def setup(context: SparkContext): this.type = {
@@ -31,14 +33,19 @@ trait PartitionerProducer extends Logging with Serializable {
                  )(implicit ct: ClassTag[T]): RDD[(Int, Int)] = {
     val bcThresholds: Broadcast[Array[Int]] = context.broadcast(thresholds)
 
-    context.makeRDD(partitions, numPartition).flatMap{ partition =>
-      var id: Int = bcThresholds.value(partition.id)
-      partition.mapNodes{ node =>
-        val res: (Int, Int) = (node, id)
-        id += 1
-        res
+    val res: RDD[(Int, Int)] = context.makeRDD(partitions, numPartition).mapPartitions {
+      _.flatMap{ partition =>
+        var id: Int = bcThresholds.value(partition.id)
+        partition.mapNodes { node =>
+          val res: (Int, Int) = (node, id)
+          id += 1
+          res
+        }
       }
     }
+
+    bcThresholds.unpersist(false)
+    res
   }
 
   def numNodes: Int

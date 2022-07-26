@@ -7,8 +7,6 @@ import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.internal.Logging
 import org.apache.spark.util.LongAccumulator
 
-import scala.annotation.tailrec
-
 case object PartitionerTester extends Logging{
   var context: SparkContext = _
   var config: Params = _
@@ -22,18 +20,16 @@ case object PartitionerTester extends Logging{
   def partition(graph: Graph): this.type = {
     logWarning("begin partition")
     val producer: PartitionerProducer =
-      new LPTPartitioner(config.partitions).partition(graph)
+      new LPTPartitioner(config.partitions, context).partition(graph)
     logWarning("end partition")
 
-//    println(s"producer.partitions = ${producer.partitions.mkString("\n")}")
-    println(s"producer.partitioner = ${producer.partitioner}")
+    logWarning(s"producer.partitioner = ${producer.partitioner}")
 
     val node2partition: Map[Int, Int] = producer.node2partition
-    println(s"node2partition = ${node2partition}")
+    logWarning(s"node2partition = $node2partition")
     
     val bcMap: Broadcast[Map[Int, Int]] = context.broadcast(node2partition)
     val sum: LongAccumulator = context.longAccumulator("cut")
-
     graph.toEdgeTriplet.foreachPartition { it =>
       var s = 0
       it.foreach { case (u, v, _) =>
@@ -41,6 +37,7 @@ case object PartitionerTester extends Logging{
       }
       sum.add(s)
     }
+    bcMap.unpersist(false)
 
     logWarning(s"#cut_edges: ${sum.value}")
     logWarning(s"cut rate: ${sum.value.toDouble / graph.toEdgeTriplet.count()}")

@@ -4,14 +4,14 @@ import edu.cuhk.rain.graph.Graph
 import org.apache.spark.SparkContext
 import org.apache.spark.rdd.RDD
 
-class LDGPartitioner(val numPartition: Int) extends PartitionerProducer {
+class LDGPartitioner(
+                      val numPartition: Int,
+                      val context: SparkContext
+                    ) extends PartitionerProducer {
+  super.setup(context)
+
   val partitions: Array[LDGPartition] = Array.tabulate(numPartition)(_ => LDGPartition())
   private var _numNodes: Int = 0
-
-  override def setup(context: SparkContext): this.type = {
-    super.setup(context)
-    this
-  }
 
   def partition(graph: Graph): this.type = {
     _numNodes = 0
@@ -35,7 +35,7 @@ class LDGPartitioner(val numPartition: Int) extends PartitionerProducer {
 
   lazy val partitioner = new IndexPartitioner(thresholds)
 
-  private lazy val thresholds: Array[Int] = {
+  lazy val thresholds: Array[Int] = {
     val a = new Array[Int](numPartition)
     a(0) = 0
     var i = 1

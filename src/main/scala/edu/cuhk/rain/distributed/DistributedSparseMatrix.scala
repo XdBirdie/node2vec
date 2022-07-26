@@ -59,7 +59,7 @@ class DistributedSparseMatrix(
 
   def numRows(): Int = {
     if (nRows <= 0) {
-      nRows = rows.map(_._1).reduce(math.max)
+      nRows = rows.map(_._1).reduce(math.max) + 1
     }
     nRows
   }

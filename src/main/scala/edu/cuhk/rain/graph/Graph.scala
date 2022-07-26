@@ -22,15 +22,20 @@ class Graph private(
   }
 
   lazy val toAdj: RDD[(Int, Array[(Int, Double)])] = {
-    val edgeCreator: (Int, Int, Double) => Array[(Int, Array[(Int, Double)])] =
-      if (directed) createDirectedEdge else createUndirectedEdge
     val bcEdgeCreator: Broadcast[(Int, Int, Double) => Array[(Int, Array[(Int, Double)])]] =
-      context.broadcast(edgeCreator)
-
-    toEdgeTriplet.mapPartitions {
-      _.flatMap { case (u, v, w) => bcEdgeCreator.value(u, v, w) }
-    }.reduceByKey(_ ++ _)
-  }.cache()
+      context.broadcast(
+        if (directed) createDirectedEdge
+        else createUndirectedEdge
+      )
+    val res: RDD[(Int, Array[(Int, Double)])] =
+      toEdgeTriplet.mapPartitions {
+        _.flatMap {
+          case (u, v, w) => bcEdgeCreator.value(u, v, w)
+        }
+      }.reduceByKey(_ ++ _).cache()
+    bcEdgeCreator.unpersist(false)
+    res
+  }
 
   lazy val toEdgelist: RDD[(Int, Int)] = {
     (if (weighted)
@@ -76,8 +81,7 @@ class Graph private(
     this
   }
 
-  def toMatrix(node2id: RDD[(Int, Int)]): DistributedSparseMatrix = {
-    val numNodes: Int = node2id.cache().map(_._2).max()
+  def toMatrix(node2id: RDD[(Int, Int)], numNodes: Int): DistributedSparseMatrix = {
     val neighbors: RDD[(Int, Int)] = toEdgelist.join(node2id).map{
       case (u, (v, uid)) => (v, uid)
     }.join(node2id).map {
@@ -91,6 +95,7 @@ class Graph private(
     val neighbors: RDD[(Int, Int)] = toEdgelist.map {
       case (u, v) => (bcNode2id.value(u), bcNode2id.value(v))
     }
+    bcNode2id.unpersist(false)
     DistributedSparseMatrix.fromEdgeList(neighbors, numNodes, directed, ids = true)
   }
 

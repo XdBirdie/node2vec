@@ -1,6 +1,5 @@
 package edu.cuhk.rain.distributed
 
-import com.sun.scenario.effect.InvertMask
 import edu.cuhk.rain.graphBLAS.{Monoid, Semiring}
 import org.apache.spark.Partitioner.defaultPartitioner
 import org.apache.spark.broadcast.Broadcast
@@ -83,7 +82,7 @@ class DistributedSparseVector(
   }
 
   def multiply(m: DistributedSparseMatrix, partitioner: Partitioner, semiring: Semiring[Double, Double]): DistributedSparseVector = {
-    require(size == m.numRows())
+    require(size == m.numRows(), s"size: $size, m.numRows: ${m.numRows()}")
     val res: RDD[(Int, Double)] = m.rows.join(v, partitioner).flatMap { case (_, (ov, s)) =>
       ov.multiply(s, semiring.mul_Op).values
     }.reduceByKey(partitioner, (x0, x1) => semiring.add_op(x0, x1))
