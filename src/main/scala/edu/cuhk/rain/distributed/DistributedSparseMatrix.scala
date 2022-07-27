@@ -13,6 +13,68 @@ class DistributedSparseMatrix(
 
   def this(rows: RDD[(Int, SparseVector)]) = this(rows, 0, 0)
 
+  private def coPartitioner(other: DistributedSparseMatrix): Partitioner = {
+    rows.partitioner match {
+      case Some(partitioner) => partitioner
+      case None => defaultPartitioner(rows, other.rows)
+    }
+  }
+
+  def add(other: DistributedSparseMatrix): DistributedSparseMatrix = {
+    require(this.numRows() == other.numRows())
+    require(this.numCols() == other.numCols())
+
+    val value: RDD[(Int, SparseVector)] = rows.fullOuterJoin(
+      other.rows, coPartitioner(other)
+    ).mapValues { case (x, y) =>
+      if (x.isEmpty)  y.get
+      else if (y.isEmpty)  x.get
+      else x.get add y.get
+    }
+    new DistributedSparseMatrix(value, numRows(), numCols())
+  }
+
+  def dot(other: DistributedSparseMatrix): DistributedSparseMatrix = {
+    require(this.numRows() == other.numRows())
+    require(this.numCols() == other.numCols())
+
+    val value: RDD[(Int, SparseVector)] = rows.fullOuterJoin(
+      other.rows, coPartitioner(other)
+    ).mapValues { case (x, y) =>
+      if (x.isEmpty)  null
+      else if (y.isEmpty)  null
+      else x.get multiply y.get
+    }.filter(_._2 != null)
+    new DistributedSparseMatrix(value, numRows(), numCols())
+  }
+
+  def div(other: DistributedSparseMatrix): DistributedSparseMatrix = {
+    require(this.numRows() == other.numRows())
+    require(this.numCols() == other.numCols())
+
+    val value: RDD[(Int, SparseVector)] = rows.fullOuterJoin(
+      other.rows, coPartitioner(other)
+    ).mapValues { case (x, y) =>
+      if (x.isEmpty)  null
+      else if (y.isEmpty)  null
+      else x.get div y.get
+    }.filter(_._2 != null)
+    new DistributedSparseMatrix(value, numRows(), numCols())
+  }
+
+  def maskBy(masks: DistributedSparseMatrix, positive: Boolean):DistributedSparseMatrix = {
+    require(this.numRows() == masks.numRows())
+    require(this.numCols() == masks.numCols())
+
+    val value: RDD[(Int, SparseVector)] = rows.join(
+      masks.rows, coPartitioner(masks)
+    ).mapValues { case (v, mask) =>
+        val m: Array[Int] = mask.mapActive((i, _) => i)
+        v.maskBy(m, positive)
+      }
+    new DistributedSparseMatrix(value, numRows(), numCols())
+  }
+
   def partitionBy(partitioner: Partitioner): DistributedSparseMatrix = {
     new DistributedSparseMatrix(rows.partitionBy(partitioner), numRows(), numCols())
   }

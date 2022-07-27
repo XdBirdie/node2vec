@@ -99,6 +99,8 @@ class DistributedSparseVector(
       if (mask.isEmpty ^ bcPositive.value) None
       else x
     }.filter(_._2.isDefined).mapValues(_.get)
+
+    bcPositive.unpersist(false)
     new DistributedSparseVector(res, size)
   }
 
